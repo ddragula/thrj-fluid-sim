@@ -69,31 +69,6 @@ fn renderDye(p: vec2i) -> vec3f {
         + glow * vec3f(0.10, 0.32, 0.75);
 }
 
-fn sampleScalarTexture(tex: texture_2d<f32>, uv: vec2f) -> f32 {
-    let size = vec2f(textureDimensions(tex));
-    let maxIndex = vec2i(textureDimensions(tex)) - vec2i(1);
-
-    let pos = clamp(uv, vec2f(0.0), vec2f(0.999999)) * size - vec2f(0.5);
-    let baseFloor = floor(pos);
-    let base = vec2i(baseFloor);
-    let frac = pos - baseFloor;
-
-    let p00 = clamp(base, vec2i(0), maxIndex);
-    let p10 = clamp(base + vec2i(1, 0), vec2i(0), maxIndex);
-    let p01 = clamp(base + vec2i(0, 1), vec2i(0), maxIndex);
-    let p11 = clamp(base + vec2i(1, 1), vec2i(0), maxIndex);
-
-    let s00 = textureLoad(tex, p00, 0).x;
-    let s10 = textureLoad(tex, p10, 0).x;
-    let s01 = textureLoad(tex, p01, 0).x;
-    let s11 = textureLoad(tex, p11, 0).x;
-
-    let a = mix(s00, s10, frac.x);
-    let b = mix(s01, s11, frac.x);
-
-    return mix(a, b, frac.y);
-}
-
 fn temperaturePalette(position: f32) -> vec3f {
     // Keep these stops in sync with the temperature legend in the control panel.
     let clampedPosition = clamp(position, 0.0, 1.0);
@@ -139,8 +114,8 @@ fn temperaturePalette(position: f32) -> vec3f {
     return mix(yellow, nearWhite, smoothstep(0.90, 1.0, clampedPosition));
 }
 
-fn renderTemperature(uv: vec2f) -> vec3f {
-    let temperature = sampleScalarTexture(temperatureTex, uv);
+fn renderTemperature(p: vec2i) -> vec3f {
+    let temperature = textureLoad(temperatureTex, p, 0).x;
     let displaySpan = max(
         renderParams.displayMax - renderParams.displayMin,
         1e-5
@@ -216,7 +191,7 @@ fn fs(in: VSOut) -> @location(0) vec4f {
     if (renderParams.mode == 0u) {
         color = renderDye(p);
     } else if (renderParams.mode == 1u) {
-        color = renderTemperature(uv);
+        color = renderTemperature(p);
     } else if (renderParams.mode == 2u) {
         color = renderVelocity(p);
     }

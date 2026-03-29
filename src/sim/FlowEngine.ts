@@ -182,6 +182,10 @@ export class FlowEngine {
         return this.velocity.readView;
     }
 
+    getPressureView(): GPUTextureView {
+        return this.pressure.readView;
+    }
+
     getDomainElementsBuffer(): GPUBuffer {
         return this.domainElementsBuffer;
     }
@@ -222,6 +226,11 @@ export class FlowEngine {
             y,
             magnitude: Math.hypot(x, y)
         };
+    }
+
+    async samplePressureAtUv(uv: Point): Promise<number> {
+        const sample = await this.readPixel(this.pressure.readTexture, uv);
+        return sample[0];
     }
 
     setDomainElements(elements: DomainElement[]): void {

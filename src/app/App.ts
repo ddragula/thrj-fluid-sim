@@ -368,10 +368,13 @@ export class App {
             this.flow.getDyeView(),
             this.flow.getTemperatureView(),
             this.flow.getVelocityView(),
+            this.flow.getPressureView(),
             this.flow.getDomainElementsBuffer(),
             this.renderMode,
             this.simulationParams.ambientTemperature,
             this.simulationParams.heaterTemperature,
+            this.simulationParams.gravity,
+            this.simulationParams.thermalExpansionCoefficient,
             this.flow.getDomainAspectRatio(),
             this.flow.getDomainWidthMeters(),
             this.flow.getDomainHeightMeters(),
@@ -522,11 +525,14 @@ export class App {
             } else if (mode === RenderMode.Temperature) {
                 const value = await this.flow.sampleTemperatureAtUv(uv);
                 valueText = `Temperature ${value.toFixed(2)} °C`;
-            } else {
+            } else if (mode === RenderMode.Velocity) {
                 const value = await this.flow.sampleVelocityAtUv(uv);
                 valueText =
                     `Speed ${value.magnitude.toFixed(3)} m/s | ` +
                     `vx ${value.x.toFixed(3)} | vy ${value.y.toFixed(3)}`;
+            } else {
+                const value = await this.flow.samplePressureAtUv(uv);
+                valueText = `Projection pressure q ${value.toExponential(3)} m^2/s`;
             }
 
             if (requestId !== this.hoverProbeRequestId || !this.hoverUv) {

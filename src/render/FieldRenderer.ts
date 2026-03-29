@@ -1,6 +1,7 @@
 import { GpuContext } from '../gpu/GpuContext';
 import { RenderMode } from './RenderMode';
 import { getTemperatureDisplayRange } from './temperatureScale';
+import { getPressureDisplayRange } from './pressureScale';
 import presentFieldsShader from '../shaders/present-fields.wgsl?raw';
 
 export class FieldRenderer {
@@ -38,10 +39,13 @@ export class FieldRenderer {
         dyeView: GPUTextureView,
         temperatureView: GPUTextureView,
         velocityView: GPUTextureView,
+        pressureView: GPUTextureView,
         domainElementsBuffer: GPUBuffer,
         mode: RenderMode,
         ambientTemperature: number,
         heaterTemperature: number,
+        gravity: number,
+        thermalExpansionCoefficient: number,
         domainAspectRatio: number,
         domainWidthMeters: number,
         domainHeightMeters: number,
@@ -53,6 +57,12 @@ export class FieldRenderer {
         const temperatureDisplayRange = getTemperatureDisplayRange(
             ambientTemperature,
             heaterTemperature
+        );
+        const pressureDisplayRange = getPressureDisplayRange(
+            ambientTemperature,
+            heaterTemperature,
+            gravity,
+            thermalExpansionCoefficient
         );
         const viewportAspectRatio = canvas.width / canvas.height;
 
@@ -70,6 +80,7 @@ export class FieldRenderer {
         renderParamsView.setFloat32(48, cameraZoom, true);
         renderParamsView.setFloat32(52, domainWidthMeters, true);
         renderParamsView.setFloat32(56, domainHeightMeters, true);
+        renderParamsView.setFloat32(60, pressureDisplayRange.max, true);
 
         device.queue.writeBuffer(this.renderParamsBuffer, 0, renderParams);
 
@@ -79,8 +90,9 @@ export class FieldRenderer {
                 { binding: 0, resource: dyeView },
                 { binding: 1, resource: temperatureView },
                 { binding: 2, resource: velocityView },
-                { binding: 3, resource: { buffer: domainElementsBuffer } },
-                { binding: 4, resource: { buffer: this.renderParamsBuffer } }
+                { binding: 3, resource: pressureView },
+                { binding: 4, resource: { buffer: domainElementsBuffer } },
+                { binding: 5, resource: { buffer: this.renderParamsBuffer } }
             ]
         });
 

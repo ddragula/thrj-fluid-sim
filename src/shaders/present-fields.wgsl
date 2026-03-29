@@ -7,6 +7,9 @@ var temperatureTex: texture_2d<f32>;
 @group(0) @binding(2)
 var velocityTex: texture_2d<f32>;
 
+@group(0) @binding(3)
+var pressureTex: texture_2d<f32>;
+
 const DOMAIN_ELEMENT_TYPE_NONE: u32 = 0u;
 const DOMAIN_ELEMENT_TYPE_AMBIENT_WALL: u32 = 1u;
 const DOMAIN_ELEMENT_TYPE_HOT_CIRCLE: u32 = 2u;
@@ -38,7 +41,7 @@ struct RenderParams {
     cameraZoom: f32,
     domainWidthMeters: f32,
     domainHeightMeters: f32,
-    _pad4: f32,
+    pressureDisplayMagnitude: f32,
 }
 
 struct VSOut {
@@ -56,10 +59,10 @@ struct SolidSample {
     temperature: f32,
 }
 
-@group(0) @binding(3)
+@group(0) @binding(4)
 var<storage, read> domainElements: array<DomainElement, MAX_DOMAIN_ELEMENTS>;
 
-@group(0) @binding(4)
+@group(0) @binding(5)
 var<uniform> renderParams: RenderParams;
 
 @vertex
@@ -177,6 +180,52 @@ fn renderVelocity(p: vec2i) -> vec3f {
     return color + intensity * intensity * 0.24 * vec3f(0.85, 0.95, 1.0);
 }
 
+fn pressurePalette(position: f32) -> vec3f {
+    let clampedPosition = clamp(position, 0.0, 1.0);
+
+    let deepBlue = vec3f(0.071, 0.227, 0.478);
+    let brightBlue = vec3f(0.110, 0.463, 0.824);
+    let cyan = vec3f(0.435, 0.851, 1.0);
+    let nearWhite = vec3f(0.933, 0.965, 1.0);
+    let paleAmber = vec3f(1.0, 0.835, 0.541);
+    let orange = vec3f(1.0, 0.573, 0.282);
+    let warmRed = vec3f(0.812, 0.298, 0.176);
+
+    if (clampedPosition <= 0.22) {
+        return mix(deepBlue, brightBlue, smoothstep(0.0, 0.22, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.42) {
+        return mix(brightBlue, cyan, smoothstep(0.22, 0.42, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.50) {
+        return mix(cyan, nearWhite, smoothstep(0.42, 0.50, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.58) {
+        return mix(nearWhite, paleAmber, smoothstep(0.50, 0.58, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.78) {
+        return mix(paleAmber, orange, smoothstep(0.58, 0.78, clampedPosition));
+    }
+
+    return mix(orange, warmRed, smoothstep(0.78, 1.0, clampedPosition));
+}
+
+fn renderPressure(p: vec2i) -> vec3f {
+    let pressure = textureLoad(pressureTex, p, 0).x;
+    let magnitude = max(renderParams.pressureDisplayMagnitude, 1e-8);
+    let normalized = clamp(0.5 + 0.5 * pressure / magnitude, 0.0, 1.0);
+    let banded = floor(normalized * 20.0 + 0.5) / 20.0;
+    let paletteColor = pressurePalette(banded);
+    let intensity = abs(normalized - 0.5) * 2.0;
+    let glow = intensity * intensity * 0.12;
+
+    return paletteColor + glow * vec3f(0.88, 0.92, 1.0);
+}
+
 fn distanceToSegment(point: vec2f, start: vec2f, end: vec2f) -> f32 {
     let delta = end - start;
     let lengthSquared = max(dot(delta, delta), 1e-12);
@@ -282,6 +331,8 @@ fn fs(in: VSOut) -> @location(0) vec4f {
         color = renderTemperature(p);
     } else if (renderParams.mode == 2u) {
         color = renderVelocity(p);
+    } else if (renderParams.mode == 3u) {
+        color = renderPressure(p);
     }
 
     return vec4f(color, 1.0);

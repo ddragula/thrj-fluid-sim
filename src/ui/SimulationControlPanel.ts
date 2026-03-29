@@ -8,6 +8,10 @@ import {
     TEMPERATURE_SCALE_STOPS,
     getTemperatureDisplayRange
 } from '../render/temperatureScale';
+import {
+    PRESSURE_SCALE_STOPS,
+    getPressureDisplayRange
+} from '../render/pressureScale';
 import { getPanelsHost } from './panelHost';
 
 type ParamControlDescriptor = {
@@ -114,7 +118,8 @@ const ALL_PARAM_CONTROLS: ParamControlDescriptor[] = [
 const RENDER_MODE_OPTIONS = [
     { mode: RenderMode.Temperature, label: 'Temperature' },
     { mode: RenderMode.Dye, label: 'Dye' },
-    { mode: RenderMode.Velocity, label: 'Velocity' }
+    { mode: RenderMode.Velocity, label: 'Velocity' },
+    { mode: RenderMode.Pressure, label: 'Projection Pressure' }
 ] as const;
 
 export class SimulationControlPanel {
@@ -124,11 +129,17 @@ export class SimulationControlPanel {
     private readonly modeButtons = new Map<RenderMode, HTMLButtonElement>();
     private readonly betaValue: HTMLSpanElement;
     private readonly temperatureLegend: HTMLDivElement;
+    private readonly pressureLegend: HTMLDivElement;
     private readonly dyeControlsSection: HTMLDivElement;
     private temperatureLegendBar!: HTMLDivElement;
     private temperatureLegendMin!: HTMLSpanElement;
     private temperatureLegendMax!: HTMLSpanElement;
     private temperatureLegendContext!: HTMLSpanElement;
+    private pressureLegendBar!: HTMLDivElement;
+    private pressureLegendMin!: HTMLSpanElement;
+    private pressureLegendMid!: HTMLSpanElement;
+    private pressureLegendMax!: HTMLSpanElement;
+    private pressureLegendContext!: HTMLSpanElement;
     private dyeHintDismissed = false;
     private renderMode: RenderMode;
 
@@ -161,6 +172,8 @@ export class SimulationControlPanel {
         content.appendChild(this.createRenderModeSection());
         this.temperatureLegend = this.createTemperatureLegendSection();
         content.appendChild(this.temperatureLegend);
+        this.pressureLegend = this.createPressureLegendSection();
+        content.appendChild(this.pressureLegend);
         this.dyeControlsSection = this.createDyeControlsSection();
         content.appendChild(this.dyeControlsSection);
 
@@ -255,6 +268,42 @@ export class SimulationControlPanel {
         return section;
     }
 
+    private createPressureLegendSection(): HTMLDivElement {
+        const section = document.createElement('div');
+        section.className = 'simulation-panel__legend simulation-panel__legend--hidden';
+
+        const title = document.createElement('div');
+        title.className = 'simulation-panel__legend-title';
+        title.textContent = 'Projection Pressure q';
+        section.appendChild(title);
+
+        const bar = document.createElement('div');
+        bar.className = 'simulation-panel__legend-bar';
+        section.appendChild(bar);
+        this.pressureLegendBar = bar;
+
+        const range = document.createElement('div');
+        range.className = 'simulation-panel__legend-range';
+
+        const min = document.createElement('span');
+        const mid = document.createElement('span');
+        const max = document.createElement('span');
+        range.appendChild(min);
+        range.appendChild(mid);
+        range.appendChild(max);
+        section.appendChild(range);
+        this.pressureLegendMin = min;
+        this.pressureLegendMid = mid;
+        this.pressureLegendMax = max;
+
+        const context = document.createElement('div');
+        context.className = 'simulation-panel__legend-context';
+        section.appendChild(context);
+        this.pressureLegendContext = context;
+
+        return section;
+    }
+
     private createControl(descriptor: ParamControlDescriptor): HTMLElement {
         const row = document.createElement('div');
         row.className = 'simulation-panel__row';
@@ -324,7 +373,7 @@ export class SimulationControlPanel {
         section.appendChild(label);
 
         const modeGroup = document.createElement('div');
-        modeGroup.className = 'simulation-panel__mode-group';
+        modeGroup.className = 'simulation-panel__mode-group simulation-panel__mode-group--views';
 
         for (const option of RENDER_MODE_OPTIONS) {
             const button = document.createElement('button');
@@ -381,6 +430,7 @@ export class SimulationControlPanel {
 
         this.betaValue.textContent = `${this.params.thermalExpansionCoefficient.toExponential(3)} 1/K`;
         this.refreshTemperatureLegend(snapshot);
+        this.refreshPressureLegend(snapshot);
         this.updateModeButtons();
     }
 
@@ -388,6 +438,10 @@ export class SimulationControlPanel {
         this.temperatureLegend.classList.toggle(
             'simulation-panel__legend--hidden',
             this.renderMode !== RenderMode.Temperature
+        );
+        this.pressureLegend.classList.toggle(
+            'simulation-panel__legend--hidden',
+            this.renderMode !== RenderMode.Pressure
         );
         this.dyeControlsSection.classList.toggle(
             'simulation-panel__legend--hidden',
@@ -426,6 +480,22 @@ export class SimulationControlPanel {
         this.temperatureLegendContext.textContent =
             `Ambient ${formatLegendTemperature(snapshot.ambientTemperature)} °C | ` +
             `Heater ${formatLegendTemperature(snapshot.heaterTemperature)} °C`;
+    }
+
+    private refreshPressureLegend(snapshot: FlowSimulationParamValues): void {
+        const range = getPressureDisplayRange(
+            snapshot.ambientTemperature,
+            snapshot.heaterTemperature,
+            snapshot.gravity,
+            this.params.thermalExpansionCoefficient
+        );
+
+        this.pressureLegendBar.style.background = createPressureLegendGradient();
+        this.pressureLegendMin.textContent = formatPressureLegendValue(range.min);
+        this.pressureLegendMid.textContent = '0';
+        this.pressureLegendMax.textContent = formatPressureLegendValue(range.max);
+        this.pressureLegendContext.textContent =
+            'Relative projection pressure q [m^2/s], centered at zero. Not absolute static pressure.';
     }
 }
 
@@ -468,8 +538,20 @@ function createTemperatureLegendGradient(): string {
     return `linear-gradient(90deg, ${colorStops.join(', ')})`;
 }
 
+function createPressureLegendGradient(): string {
+    const colorStops = PRESSURE_SCALE_STOPS.map((stop) => {
+        return `${stop.color} ${(clamp01(stop.position) * 100).toFixed(2)}%`;
+    });
+
+    return `linear-gradient(90deg, ${colorStops.join(', ')})`;
+}
+
 function formatLegendTemperature(value: number): string {
     return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatPressureLegendValue(value: number): string {
+    return `${value.toExponential(1)} m^2/s`;
 }
 
 function clamp01(value: number): number {

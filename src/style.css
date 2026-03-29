@@ -31,6 +31,35 @@ body {
     overflow: hidden;
 }
 
+.simulation-hint {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 9;
+    max-width: min(760px, calc(100vw - 48px));
+    color: #eff8ff;
+    font-size: clamp(28px, 3vw, 44px);
+    font-weight: 800;
+    line-height: 1.15;
+    text-align: center;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    opacity: 1;
+    visibility: visible;
+    transition:
+        opacity 320ms ease,
+        visibility 0s linear 0s;
+}
+
+.simulation-hint--hidden {
+    opacity: 0;
+    visibility: hidden;
+    transition:
+        opacity 320ms ease,
+        visibility 0s linear 320ms;
+}
+
 .simulation-panel:not([open]) {
     width: auto;
 }
@@ -234,6 +263,14 @@ body {
         left: 12px;
         right: 12px;
         width: auto;
+    }
+
+    .simulation-hint {
+        top: 50%;
+        left: 50%;
+        right: auto;
+        max-width: min(420px, calc(100vw - 32px));
+        font-size: clamp(22px, 7vw, 32px);
     }
 
     .simulation-panel__inputs {

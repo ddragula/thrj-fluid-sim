@@ -45,15 +45,41 @@ fn vs(@builtin(vertex_index) index: u32) -> VSOut {
 fn renderDye(p: vec2i) -> vec3f {
     let dye = clamp(textureLoad(dyeTex, p, 0).x, 0.0, 1.0);
     let background = vec3f(0.01, 0.016, 0.028);
+    let visibleDye = 1.0 - exp(-6.0 * dye);
     let tracer = mix(
         vec3f(0.04, 0.12, 0.20),
         vec3f(0.55, 0.88, 1.0),
-        smoothstep(0.0, 1.0, dye)
+        smoothstep(0.0, 1.0, visibleDye)
     );
-    let glow = smoothstep(0.1, 1.0, dye) * 0.28;
+    let glow = smoothstep(0.02, 0.45, visibleDye) * 0.34;
 
-    return mix(background, tracer, smoothstep(0.0, 0.85, dye))
+    return mix(background, tracer, smoothstep(0.0, 0.65, visibleDye))
         + glow * vec3f(0.10, 0.32, 0.75);
+}
+
+fn sampleScalarTexture(tex: texture_2d<f32>, uv: vec2f) -> f32 {
+    let size = vec2f(textureDimensions(tex));
+    let maxIndex = vec2i(textureDimensions(tex)) - vec2i(1);
+
+    let pos = clamp(uv, vec2f(0.0), vec2f(0.999999)) * size - vec2f(0.5);
+    let baseFloor = floor(pos);
+    let base = vec2i(baseFloor);
+    let frac = pos - baseFloor;
+
+    let p00 = clamp(base, vec2i(0), maxIndex);
+    let p10 = clamp(base + vec2i(1, 0), vec2i(0), maxIndex);
+    let p01 = clamp(base + vec2i(0, 1), vec2i(0), maxIndex);
+    let p11 = clamp(base + vec2i(1, 1), vec2i(0), maxIndex);
+
+    let s00 = textureLoad(tex, p00, 0).x;
+    let s10 = textureLoad(tex, p10, 0).x;
+    let s01 = textureLoad(tex, p01, 0).x;
+    let s11 = textureLoad(tex, p11, 0).x;
+
+    let a = mix(s00, s10, frac.x);
+    let b = mix(s01, s11, frac.x);
+
+    return mix(a, b, frac.y);
 }
 
 fn temperaturePalette(position: f32) -> vec3f {
@@ -101,8 +127,8 @@ fn temperaturePalette(position: f32) -> vec3f {
     return mix(yellow, nearWhite, smoothstep(0.90, 1.0, clampedPosition));
 }
 
-fn renderTemperature(p: vec2i) -> vec3f {
-    let temperature = textureLoad(temperatureTex, p, 0).x;
+fn renderTemperature(uv: vec2f) -> vec3f {
+    let temperature = sampleScalarTexture(temperatureTex, uv);
     let displaySpan = max(
         renderParams.displayMax - renderParams.displayMin,
         1e-5
@@ -132,10 +158,10 @@ fn renderVelocity(p: vec2i) -> vec3f {
         0.5 + 0.5 * direction.y,
         0.5 - 0.5 * direction.x
     );
-    let intensity = smoothstep(0.0, 0.35, speed);
+    let intensity = 1.0 - exp(-18.0 * speed);
     let color = mix(background, directionColor * (0.35 + 0.9 * intensity), intensity);
 
-    return color + intensity * intensity * 0.18 * vec3f(0.85, 0.95, 1.0);
+    return color + intensity * intensity * 0.24 * vec3f(0.85, 0.95, 1.0);
 }
 
 @fragment
@@ -149,7 +175,7 @@ fn fs(in: VSOut) -> @location(0) vec4f {
     if (renderParams.mode == 0u) {
         color = renderDye(p);
     } else if (renderParams.mode == 1u) {
-        color = renderTemperature(p);
+        color = renderTemperature(uv);
     } else if (renderParams.mode == 2u) {
         color = renderVelocity(p);
     }

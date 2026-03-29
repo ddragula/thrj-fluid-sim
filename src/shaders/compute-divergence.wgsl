@@ -12,9 +12,17 @@ struct Params {
     thermalDiffusivity: f32,
     dyeDecayRate: f32,
     heaterTemperature: f32,
-    heaterRadiusX: f32,
-    heaterRadiusY: f32,
-    _pad0: f32,
+    heaterCenterX: f32,
+    heaterCenterY: f32,
+    heaterRadius: f32,
+    dyeBrushFromX: f32,
+    dyeBrushFromY: f32,
+    dyeBrushToX: f32,
+    dyeBrushToY: f32,
+    dyeBrushRadius: f32,
+    dyeBrushStrength: f32,
+    dyeBrushActive: f32,
+    _pad1: f32,
 }
 
 @group(0) @binding(0)
@@ -27,13 +35,30 @@ var divergenceOut: texture_storage_2d<rgba32float, write>;
 var<uniform> params: Params;
 
 
-fn loadVelocity(p: vec2i, size: vec2u) -> vec2f {
+fn cellCenterPosition(id: vec2u) -> vec2f {
+    return (vec2f(id.xy) + vec2f(0.5)) * vec2f(params.dx, params.dy);
+}
+
+fn isHeaterPosition(position: vec2f) -> bool {
+    let offset = position - vec2f(params.heaterCenterX, params.heaterCenterY);
+    return dot(offset, offset) <= params.heaterRadius * params.heaterRadius;
+}
+
+fn isSolidIndex(p: vec2i, size: vec2u) -> bool {
     if (
         p.x < 0 ||
         p.y < 0 ||
         p.x >= i32(size.x) ||
         p.y >= i32(size.y)
     ) {
+        return true;
+    }
+
+    return isHeaterPosition((vec2f(p) + vec2f(0.5)) * vec2f(params.dx, params.dy));
+}
+
+fn loadVelocity(p: vec2i, size: vec2u) -> vec2f {
+    if (isSolidIndex(p, size)) {
         return vec2f(0.0);
     }
 
@@ -49,6 +74,12 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     }
 
     let p = vec2i(id.xy);
+
+    if (isSolidIndex(p, sizeU)) {
+        textureStore(divergenceOut, p, vec4f(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+
     let left = loadVelocity(p + vec2i(-1, 0), sizeU);
     let right = loadVelocity(p + vec2i(1, 0), sizeU);
     let top = loadVelocity(p + vec2i(0, -1), sizeU);

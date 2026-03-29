@@ -5,8 +5,6 @@ export const defaultFlowSimulationParams = {
     thermalDiffusivity: 2.2e-5,
     dyeDecayRate: 0.24,
     heaterTemperature: 80.0,
-    heaterRadiusX: 0.055,
-    heaterRadiusY: 0.020,
     pressureIterations: 80
 };
 
@@ -98,28 +96,6 @@ export class FlowSimulationParams {
         );
     }
 
-    get heaterRadiusX(): number {
-        return this.values.heaterRadiusX;
-    }
-
-    set heaterRadiusX(value: number) {
-        this.values.heaterRadiusX = clampMin(
-            readNumber(value, defaultFlowSimulationParams.heaterRadiusX),
-            1e-4
-        );
-    }
-
-    get heaterRadiusY(): number {
-        return this.values.heaterRadiusY;
-    }
-
-    set heaterRadiusY(value: number) {
-        this.values.heaterRadiusY = clampMin(
-            readNumber(value, defaultFlowSimulationParams.heaterRadiusY),
-            1e-4
-        );
-    }
-
     get pressureIterations(): number {
         return this.values.pressureIterations;
     }
@@ -149,12 +125,6 @@ export class FlowSimulationParams {
         }
         if (patch.heaterTemperature !== undefined) {
             this.heaterTemperature = patch.heaterTemperature;
-        }
-        if (patch.heaterRadiusX !== undefined) {
-            this.heaterRadiusX = patch.heaterRadiusX;
-        }
-        if (patch.heaterRadiusY !== undefined) {
-            this.heaterRadiusY = patch.heaterRadiusY;
         }
         if (patch.pressureIterations !== undefined) {
             this.pressureIterations = patch.pressureIterations;

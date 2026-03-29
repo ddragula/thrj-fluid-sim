@@ -82,13 +82,14 @@ const PARAM_CONTROLS: ParamControlDescriptor[] = [
 ];
 
 const RENDER_MODE_OPTIONS = [
-    { mode: RenderMode.Dye, label: 'Dye' },
     { mode: RenderMode.Temperature, label: 'Temperature' },
+    { mode: RenderMode.Dye, label: 'Dye' },
     { mode: RenderMode.Velocity, label: 'Velocity' }
 ] as const;
 
 export class SimulationControlPanel {
     private readonly root: HTMLDetailsElement;
+    private readonly dyeHint: HTMLDivElement;
     private readonly controls = new Map<FlowSimulationParamKey, ParamControlElements>();
     private readonly modeButtons = new Map<RenderMode, HTMLButtonElement>();
     private readonly betaValue: HTMLSpanElement;
@@ -97,6 +98,7 @@ export class SimulationControlPanel {
     private temperatureLegendMin!: HTMLSpanElement;
     private temperatureLegendMax!: HTMLSpanElement;
     private temperatureLegendContext!: HTMLSpanElement;
+    private dyeHintDismissed = false;
     private renderMode: RenderMode;
 
     constructor(
@@ -105,11 +107,16 @@ export class SimulationControlPanel {
         private readonly onRenderModeChange: (mode: RenderMode) => void
     ) {
         document.querySelector('.simulation-panel')?.remove();
+        document.querySelector('.simulation-hint')?.remove();
         this.renderMode = initialRenderMode;
 
         this.root = document.createElement('details');
         this.root.className = 'simulation-panel';
         this.root.open = false;
+
+        this.dyeHint = document.createElement('div');
+        this.dyeHint.className = 'simulation-hint';
+        this.dyeHint.textContent = 'Drag on the canvas to add dye and reveal the flow.';
 
         const summary = document.createElement('summary');
         summary.className = 'simulation-panel__summary';
@@ -150,8 +157,18 @@ export class SimulationControlPanel {
 
         content.appendChild(actions);
         document.body.appendChild(this.root);
+        document.body.appendChild(this.dyeHint);
 
         this.refresh();
+    }
+
+    dismissDyeHint(): void {
+        if (this.renderMode !== RenderMode.Dye || this.dyeHintDismissed) {
+            return;
+        }
+
+        this.dyeHintDismissed = true;
+        this.updateModeButtons();
     }
 
     private createTemperatureLegendSection(): HTMLDivElement {
@@ -302,9 +319,8 @@ export class SimulationControlPanel {
             button.className = 'simulation-panel__mode-button';
             button.textContent = option.label;
             button.addEventListener('click', () => {
-                this.renderMode = option.mode;
+                this.setRenderMode(option.mode);
                 this.onRenderModeChange(option.mode);
-                this.updateModeButtons();
             });
             this.modeButtons.set(option.mode, button);
             modeGroup.appendChild(button);
@@ -319,11 +335,25 @@ export class SimulationControlPanel {
             'simulation-panel__legend--hidden',
             this.renderMode !== RenderMode.Temperature
         );
+        this.dyeHint.classList.toggle(
+            'simulation-hint--hidden',
+            this.renderMode !== RenderMode.Dye || this.dyeHintDismissed
+        );
 
         for (const [mode, button] of this.modeButtons) {
             button.classList.toggle('simulation-panel__mode-button--active', mode === this.renderMode);
             button.setAttribute('aria-pressed', mode === this.renderMode ? 'true' : 'false');
         }
+    }
+
+    private setRenderMode(mode: RenderMode): void {
+        this.renderMode = mode;
+
+        if (mode === RenderMode.Dye) {
+            this.dyeHintDismissed = false;
+        }
+
+        this.updateModeButtons();
     }
 
     private refreshTemperatureLegend(snapshot: FlowSimulationParamValues): void {

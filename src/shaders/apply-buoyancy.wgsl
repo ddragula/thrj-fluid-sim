@@ -12,9 +12,17 @@ struct Params {
     thermalDiffusivity: f32,
     dyeDecayRate: f32,
     heaterTemperature: f32,
-    heaterRadiusX: f32,
-    heaterRadiusY: f32,
-    _pad0: f32,
+    heaterCenterX: f32,
+    heaterCenterY: f32,
+    heaterRadius: f32,
+    dyeBrushFromX: f32,
+    dyeBrushFromY: f32,
+    dyeBrushToX: f32,
+    dyeBrushToY: f32,
+    dyeBrushRadius: f32,
+    dyeBrushStrength: f32,
+    dyeBrushActive: f32,
+    _pad1: f32,
 }
 
 @group(0) @binding(0)
@@ -30,13 +38,26 @@ var dstVelocity: texture_storage_2d<rgba32float, write>;
 var<uniform> params: Params;
 
 
-fn isBoundary(id: vec2u, size: vec2u) -> bool {
+fn cellCenterPosition(id: vec2u) -> vec2f {
+    return (vec2f(id.xy) + vec2f(0.5)) * vec2f(params.dx, params.dy);
+}
+
+fn isOuterBoundary(id: vec2u, size: vec2u) -> bool {
     return (
         id.x == 0u ||
         id.y == 0u ||
         id.x + 1u >= size.x ||
         id.y + 1u >= size.y
     );
+}
+
+fn isHeaterPosition(position: vec2f) -> bool {
+    let offset = position - vec2f(params.heaterCenterX, params.heaterCenterY);
+    return dot(offset, offset) <= params.heaterRadius * params.heaterRadius;
+}
+
+fn isSolidCell(id: vec2u, size: vec2u) -> bool {
+    return isOuterBoundary(id, size) || isHeaterPosition(cellCenterPosition(id));
 }
 
 @compute @workgroup_size(8, 8)
@@ -47,7 +68,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         return;
     }
 
-    if (isBoundary(id.xy, sizeU)) {
+    if (isSolidCell(id.xy, sizeU)) {
         textureStore(dstVelocity, vec2i(id.xy), vec4f(0.0, 0.0, 0.0, 1.0));
         return;
     }

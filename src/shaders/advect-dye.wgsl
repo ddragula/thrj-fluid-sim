@@ -12,9 +12,17 @@ struct Params {
     thermalDiffusivity: f32,
     dyeDecayRate: f32,
     heaterTemperature: f32,
-    heaterRadiusX: f32,
-    heaterRadiusY: f32,
-    _pad0: f32,
+    heaterCenterX: f32,
+    heaterCenterY: f32,
+    heaterRadius: f32,
+    dyeBrushFromX: f32,
+    dyeBrushFromY: f32,
+    dyeBrushToX: f32,
+    dyeBrushToY: f32,
+    dyeBrushRadius: f32,
+    dyeBrushStrength: f32,
+    dyeBrushActive: f32,
+    _pad1: f32,
 }
 
 @group(0) @binding(0)
@@ -24,13 +32,22 @@ var srcDye: texture_2d<f32>;
 var velocityTex: texture_2d<f32>;
 
 @group(0) @binding(2)
-var dstDye: texture_storage_2d<rgba8unorm, write>;
+var dstDye: texture_storage_2d<rgba32float, write>;
 
 @group(0) @binding(3)
 var<uniform> params: Params;
 
 
 fn sampleDye(uv: vec2f) -> f32 {
+    if (
+        uv.x < 0.0 ||
+        uv.x > 1.0 ||
+        uv.y < 0.0 ||
+        uv.y > 1.0
+    ) {
+        return 0.0;
+    }
+
     let size = vec2f(textureDimensions(srcDye));
     let maxIndex = vec2i(textureDimensions(srcDye)) - vec2i(1);
 
@@ -55,13 +72,35 @@ fn sampleDye(uv: vec2f) -> f32 {
     return mix(a, b, frac.y);
 }
 
-fn isBoundary(id: vec2u, size: vec2u) -> bool {
+fn domainSizeMeters() -> vec2f {
+    return vec2f(params.width * params.dx, params.height * params.dy);
+}
+
+fn cellCenterPosition(id: vec2u) -> vec2f {
+    return (vec2f(id.xy) + vec2f(0.5)) * vec2f(params.dx, params.dy);
+}
+
+fn isOuterBoundary(id: vec2u, size: vec2u) -> bool {
     return (
         id.x == 0u ||
         id.y == 0u ||
         id.x + 1u >= size.x ||
         id.y + 1u >= size.y
     );
+}
+
+fn isHeaterPosition(position: vec2f) -> bool {
+    let offset = position - vec2f(params.heaterCenterX, params.heaterCenterY);
+    return dot(offset, offset) <= params.heaterRadius * params.heaterRadius;
+}
+
+fn distanceToSegment(point: vec2f, a: vec2f, b: vec2f) -> f32 {
+    let ab = b - a;
+    let abLengthSquared = max(dot(ab, ab), 1e-8);
+    let t = clamp(dot(point - a, ab) / abLengthSquared, 0.0, 1.0);
+    let closestPoint = a + t * ab;
+
+    return distance(point, closestPoint);
 }
 
 @compute @workgroup_size(8, 8)
@@ -72,31 +111,45 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         return;
     }
 
-    if (isBoundary(id.xy, sizeU)) {
+    if (isOuterBoundary(id.xy, sizeU)) {
         textureStore(dstDye, vec2i(id.xy), vec4f(0.0, 0.0, 0.0, 1.0));
         return;
     }
 
-    let size = vec2f(sizeU);
-    let uv = (vec2f(id.xy) + vec2f(0.5)) / size;
+    let position = cellCenterPosition(id.xy);
+
+    if (isHeaterPosition(position)) {
+        textureStore(dstDye, vec2i(id.xy), vec4f(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
 
     let vel = textureLoad(velocityTex, vec2i(id.xy), 0).xy;
-    let prevUv = uv - vel * params.dt;
+    let prevPosition = position - vel * params.dt;
+    let prevUv = prevPosition / domainSizeMeters();
 
     var dye = sampleDye(prevUv);
+    dye = dye * exp(-params.dyeDecayRate * params.dt);
 
-    dye = dye * max(0.0, 1.0 - params.dyeDecayRate * params.dt);
+    if (params.dyeBrushActive > 0.5) {
+        let brushFrom = vec2f(params.dyeBrushFromX, params.dyeBrushFromY);
+        let brushTo = vec2f(params.dyeBrushToX, params.dyeBrushToY);
+        let brushDistance = distanceToSegment(position, brushFrom, brushTo);
+        let emitter = exp(
+            -0.5 * (brushDistance * brushDistance) /
+            (params.dyeBrushRadius * params.dyeBrushRadius)
+        );
 
-    let emitterCenter = vec2f(0.5, 0.94);
-    let q = uv - emitterCenter;
-    let emitter = exp(
-        -0.5 * (
-            (q.x * q.x) / (params.heaterRadiusX * params.heaterRadiusX * 1.4) +
-            (q.y * q.y) / (params.heaterRadiusY * params.heaterRadiusY * 0.85)
-        )
-    );
+        dye = clamp(
+            dye + params.dyeBrushStrength * params.dt * emitter,
+            0.0,
+            1.0
+        );
+    }
 
-    dye = clamp(dye + 4.5 * params.dt * emitter, 0.0, 1.0);
+    let outflowThickness = max(12.0 * params.dy, 0.04 * domainSizeMeters().y);
+    let outletFade = 1.0 - smoothstep(0.0, outflowThickness, position.y);
+    dye = dye * (1.0 - outletFade);
+    dye = clamp(dye, 0.0, 1.0);
 
     textureStore(dstDye, vec2i(id.xy), vec4f(dye, dye, dye, 1.0));
 }

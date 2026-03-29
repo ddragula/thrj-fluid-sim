@@ -12,9 +12,17 @@ struct Params {
     thermalDiffusivity: f32,
     dyeDecayRate: f32,
     heaterTemperature: f32,
-    heaterRadiusX: f32,
-    heaterRadiusY: f32,
-    _pad0: f32,
+    heaterCenterX: f32,
+    heaterCenterY: f32,
+    heaterRadius: f32,
+    dyeBrushFromX: f32,
+    dyeBrushFromY: f32,
+    dyeBrushToX: f32,
+    dyeBrushToY: f32,
+    dyeBrushRadius: f32,
+    dyeBrushStrength: f32,
+    dyeBrushActive: f32,
+    _pad1: f32,
 }
 
 @group(0) @binding(0)
@@ -55,13 +63,30 @@ fn sampleScalar(tex: texture_2d<f32>, uv: vec2f) -> f32 {
     return mix(a, b, frac.y);
 }
 
-fn isBoundary(id: vec2u, size: vec2u) -> bool {
+fn domainSizeMeters() -> vec2f {
+    return vec2f(params.width * params.dx, params.height * params.dy);
+}
+
+fn cellCenterPosition(id: vec2u) -> vec2f {
+    return (vec2f(id.xy) + vec2f(0.5)) * vec2f(params.dx, params.dy);
+}
+
+fn isOuterBoundary(id: vec2u, size: vec2u) -> bool {
     return (
         id.x == 0u ||
         id.y == 0u ||
         id.x + 1u >= size.x ||
         id.y + 1u >= size.y
     );
+}
+
+fn isHeaterPosition(position: vec2f) -> bool {
+    let offset = position - vec2f(params.heaterCenterX, params.heaterCenterY);
+    return dot(offset, offset) <= params.heaterRadius * params.heaterRadius;
+}
+
+fn isSolidCell(id: vec2u, size: vec2u) -> bool {
+    return isOuterBoundary(id, size) || isHeaterPosition(cellCenterPosition(id));
 }
 
 fn loadScalar(tex: texture_2d<f32>, p: vec2i, size: vec2u) -> f32 {
@@ -72,6 +97,10 @@ fn loadScalar(tex: texture_2d<f32>, p: vec2i, size: vec2u) -> f32 {
         p.y >= i32(size.y)
     ) {
         return params.ambientTemperature;
+    }
+
+    if (isHeaterPosition((vec2f(p) + vec2f(0.5)) * vec2f(params.dx, params.dy))) {
+        return params.heaterTemperature;
     }
 
     return textureLoad(tex, p, 0).x;
@@ -98,7 +127,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         return;
     }
 
-    if (isBoundary(id.xy, sizeU)) {
+    if (isOuterBoundary(id.xy, sizeU)) {
         textureStore(
             dstTemperature,
             vec2i(id.xy),
@@ -112,32 +141,34 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         return;
     }
 
-    let size = vec2f(sizeU);
-    let uv = (vec2f(id.xy) + vec2f(0.5)) / size;
+    if (isHeaterPosition(cellCenterPosition(id.xy))) {
+        textureStore(
+            dstTemperature,
+            vec2i(id.xy),
+            vec4f(
+                params.heaterTemperature,
+                params.heaterTemperature,
+                params.heaterTemperature,
+                1.0
+            )
+        );
+        return;
+    }
 
     let vel = textureLoad(velocityTex, vec2i(id.xy), 0).xy;
-    let prevUv = uv - vel * params.dt;
+    let position = cellCenterPosition(id.xy);
+    let prevPosition = position - vel * params.dt;
+    let prevUv = prevPosition / domainSizeMeters();
 
     var temperature = sampleScalar(srcTemperature, prevUv);
     temperature =
         temperature +
         params.thermalDiffusivity * params.dt * scalarLaplacian(srcTemperature, vec2i(id.xy), sizeU);
-
-    let heaterCenter = vec2f(0.5, 0.92);
-    let q = uv - heaterCenter;
-    let heater = exp(
-        -0.5 * (
-            (q.x * q.x) / (params.heaterRadiusX * params.heaterRadiusX) +
-            (q.y * q.y) / (params.heaterRadiusY * params.heaterRadiusY)
-        )
+    temperature = clamp(
+        temperature,
+        params.ambientTemperature,
+        params.heaterTemperature
     );
-    let heaterTemperature =
-        params.ambientTemperature +
-        (params.heaterTemperature - params.ambientTemperature) * heater;
-    let maxTemperature = max(params.ambientTemperature, params.heaterTemperature);
-
-    temperature = max(temperature, heaterTemperature);
-    temperature = clamp(temperature, params.ambientTemperature, maxTemperature);
 
     textureStore(
         dstTemperature,

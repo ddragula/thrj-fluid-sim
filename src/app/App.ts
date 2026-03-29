@@ -1,13 +1,21 @@
 import { GpuContext } from '../gpu/GpuContext';
-import { FullscreenRenderer } from '../render/FullscreenRenderer';
+import { FieldRenderer } from '../render/FieldRenderer';
+import { FlowEngine } from '../sim/FlowEngine';
 
 export class App {
-    private readonly renderer: FullscreenRenderer;
     private readonly gpu: GpuContext;
+
+    private readonly renderer: FieldRenderer;
+    private readonly flow: FlowEngine;
+
+    private lastTimeSeconds: number | null = null;
 
     constructor(gpu: GpuContext) {
         this.gpu = gpu;
-        this.renderer = new FullscreenRenderer(gpu);
+        
+        this.flow = new FlowEngine(gpu.device, 512, 512);
+        this.renderer = new FieldRenderer(gpu);
+
         this.handleResize = this.handleResize.bind(this);
         this.frame = this.frame.bind(this);
     }
@@ -23,9 +31,18 @@ export class App {
     }
 
     private frame(nowMs: number): void {
-        const timeSeconds = nowMs * 0.001;
+        const nowSeconds = nowMs * 0.001;
+        
+        const dt =
+            this.lastTimeSeconds === null
+                ? 1 / 60
+                : Math.min(1 / 30, nowSeconds - this.lastTimeSeconds);
 
-        this.renderer.render(timeSeconds);
+        this.lastTimeSeconds = nowSeconds;
+
+        this.flow.step(nowSeconds, dt);
+        this.renderer.render(this.flow.getDensityView());
+
         requestAnimationFrame(this.frame);
     }
 }

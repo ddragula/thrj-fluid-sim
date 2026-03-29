@@ -21,6 +21,7 @@ body {
     display: block;
     width: 100vw;
     height: 100vh;
+    touch-action: none;
 }
 
 .simulation-panels-viewport {
@@ -362,6 +363,16 @@ body {
     font-size: 11px;
     line-height: 1.4;
     color: #8ea6bf;
+}
+
+.simulation-panel__link {
+    color: #bbd8f2;
+    text-decoration: none;
+}
+
+.simulation-panel__link:hover {
+    color: #e6f4ff;
+    text-decoration: underline;
 }
 
 .simulation-panel__mode-group {

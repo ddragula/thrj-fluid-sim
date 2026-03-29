@@ -80,6 +80,31 @@ export class SettingsPanel {
 
         content.appendChild(section);
 
+        const infoSection = document.createElement('div');
+        infoSection.className = 'simulation-panel__legend';
+
+        const infoTitle = document.createElement('div');
+        infoTitle.className = 'simulation-panel__legend-title';
+        infoTitle.textContent = 'Info';
+        infoSection.appendChild(infoTitle);
+
+        const author = document.createElement('div');
+        author.className = 'simulation-panel__help';
+        author.textContent = 'Dawid Draguła';
+        infoSection.appendChild(author);
+
+        const contact = document.createElement('div');
+        contact.className = 'simulation-panel__help';
+        contact.textContent = 'Feel free to get in touch: ';
+        const emailLink = document.createElement('a');
+        emailLink.className = 'simulation-panel__link';
+        emailLink.href = 'mailto:dawid.dragula@gmail.com';
+        emailLink.textContent = 'dawid.dragula@gmail.com';
+        contact.appendChild(emailLink);
+        infoSection.appendChild(contact);
+
+        content.appendChild(infoSection);
+
         this.performanceSelect = select;
         this.performanceContext = context;
 

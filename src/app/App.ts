@@ -24,6 +24,12 @@ type Point = {
 
 type PointerInteractionMode = 'dye' | 'pan' | 'ambientWall';
 
+type TouchGestureState = {
+    anchorDomainUv: Point;
+    startZoom: number;
+    startDistance: number;
+};
+
 const MIN_CAMERA_ZOOM = 1e-4;
 const ZOOM_SENSITIVITY = 0.0015;
 const DEFAULT_CAMERA_CENTER = 0.5;
@@ -70,6 +76,8 @@ export class App {
     private hoverProbeRequestId = 0;
     private hoverProbeInFlight = false;
     private hoverProbeLastRequestTime = Number.NEGATIVE_INFINITY;
+    private readonly activeTouchCanvasUvs = new Map<number, Point>();
+    private touchGesture: TouchGestureState | null = null;
     private readonly camera = {
         centerX: DEFAULT_CAMERA_CENTER,
         centerY: DEFAULT_CAMERA_CENTER,
@@ -95,6 +103,11 @@ export class App {
             this.renderMode,
             (mode) => {
                 this.renderMode = mode;
+                if (this.domainEditMode !== 'navigate') {
+                    this.domainEditMode = 'navigate';
+                    this.domainTools.setDomainEditMode('navigate');
+                    this.updateCanvasCursor();
+                }
                 this.invalidateHoverProbe(true);
             }
         );
@@ -193,6 +206,71 @@ export class App {
         );
     }
 
+    private clearPrimaryInteraction(): void {
+        this.activePointerId = null;
+        this.pointerMode = null;
+        this.pointerCurrentUv = null;
+        this.pointerPreviousUv = null;
+        this.wallDraftStartUv = null;
+        this.wallDraftCurrentUv = null;
+        this.panPreviousCanvasUv = null;
+        this.flow.clearDyeBrush();
+        this.updateCanvasCursor();
+    }
+
+    private beginTouchGesture(): void {
+        const touchPoints = this.getTouchGesturePoints();
+
+        if (!touchPoints) {
+            this.touchGesture = null;
+            return;
+        }
+
+        const centerCanvasUv = midpoint(touchPoints[0], touchPoints[1]);
+        this.touchGesture = {
+            anchorDomainUv: this.canvasUvToDomainUvUnclamped(centerCanvasUv),
+            startZoom: this.camera.zoom,
+            startDistance: Math.max(distanceBetween(touchPoints[0], touchPoints[1]), 1e-5)
+        };
+
+        this.clearPrimaryInteraction();
+    }
+
+    private updateTouchGesture(): void {
+        if (!this.touchGesture) {
+            return;
+        }
+
+        const touchPoints = this.getTouchGesturePoints();
+        if (!touchPoints) {
+            return;
+        }
+
+        const centerCanvasUv = midpoint(touchPoints[0], touchPoints[1]);
+        const currentDistance = Math.max(distanceBetween(touchPoints[0], touchPoints[1]), 1e-5);
+        this.camera.zoom = Math.max(
+            MIN_CAMERA_ZOOM,
+            this.touchGesture.startZoom * (currentDistance / this.touchGesture.startDistance)
+        );
+
+        const visibleDomainSize = this.getVisibleDomainSize();
+        this.camera.centerX =
+            this.touchGesture.anchorDomainUv.x - (centerCanvasUv.x - 0.5) * visibleDomainSize.x;
+        this.camera.centerY =
+            this.touchGesture.anchorDomainUv.y - (centerCanvasUv.y - 0.5) * visibleDomainSize.y;
+        this.updateResetViewButton();
+    }
+
+    private getTouchGesturePoints(): [Point, Point] | null {
+        const points = Array.from(this.activeTouchCanvasUvs.values());
+
+        if (points.length < 2) {
+            return null;
+        }
+
+        return [points[0], points[1]];
+    }
+
     private applyPerformanceProfilePreference(preference: PerformanceProfilePreference): void {
         const performanceProfile = resolvePerformanceProfile(preference);
         const currentDomainElements = this.flow.getDomainElements();
@@ -224,6 +302,8 @@ export class App {
         this.wallDraftStartUv = null;
         this.wallDraftCurrentUv = null;
         this.panPreviousCanvasUv = null;
+        this.activeTouchCanvasUvs.clear();
+        this.touchGesture = null;
         this.lastTimeSeconds = null;
         this.settingsPanel.refresh(
             this.performanceProfilePreference,
@@ -237,6 +317,19 @@ export class App {
     }
 
     private handlePointerDown(event: PointerEvent): void {
+        const canvasUv = this.getCanvasUv(event);
+
+        if (event.pointerType === 'touch') {
+            this.activeTouchCanvasUvs.set(event.pointerId, canvasUv);
+            this.gpu.canvas.setPointerCapture(event.pointerId);
+
+            if (this.activeTouchCanvasUvs.size >= 2) {
+                this.beginTouchGesture();
+                event.preventDefault();
+                return;
+            }
+        }
+
         if (event.button !== 0 && event.button !== 1) {
             return;
         }
@@ -248,12 +341,14 @@ export class App {
         if (event.button === 1 || event.ctrlKey || event.shiftKey) {
             this.activePointerId = event.pointerId;
             this.pointerMode = 'pan';
-            this.panPreviousCanvasUv = this.getCanvasUv(event);
+            this.panPreviousCanvasUv = canvasUv;
             this.pointerCurrentUv = null;
             this.pointerPreviousUv = null;
             this.wallDraftStartUv = null;
             this.wallDraftCurrentUv = null;
-            this.gpu.canvas.setPointerCapture(event.pointerId);
+            if (!this.gpu.canvas.hasPointerCapture(event.pointerId)) {
+                this.gpu.canvas.setPointerCapture(event.pointerId);
+            }
             this.updateCanvasCursor();
             event.preventDefault();
             return;
@@ -281,7 +376,9 @@ export class App {
             this.pointerCurrentUv = null;
             this.pointerPreviousUv = null;
             this.panPreviousCanvasUv = null;
-            this.gpu.canvas.setPointerCapture(event.pointerId);
+            if (!this.gpu.canvas.hasPointerCapture(event.pointerId)) {
+                this.gpu.canvas.setPointerCapture(event.pointerId);
+            }
             this.updateCanvasCursor();
             event.preventDefault();
             return;
@@ -301,13 +398,31 @@ export class App {
         this.panPreviousCanvasUv = null;
         this.wallDraftStartUv = null;
         this.wallDraftCurrentUv = null;
-        this.gpu.canvas.setPointerCapture(event.pointerId);
+        if (!this.gpu.canvas.hasPointerCapture(event.pointerId)) {
+            this.gpu.canvas.setPointerCapture(event.pointerId);
+        }
         this.updateCanvasCursor();
         event.preventDefault();
     }
 
     private handlePointerMove(event: PointerEvent): void {
-        this.hoverUv = this.canvasUvToDomainUv(this.getCanvasUv(event));
+        const canvasUv = this.getCanvasUv(event);
+
+        if (event.pointerType === 'touch' && this.activeTouchCanvasUvs.has(event.pointerId)) {
+            this.activeTouchCanvasUvs.set(event.pointerId, canvasUv);
+
+            if (this.activeTouchCanvasUvs.size >= 2) {
+                if (this.touchGesture === null) {
+                    this.beginTouchGesture();
+                }
+
+                this.updateTouchGesture();
+                event.preventDefault();
+                return;
+            }
+        }
+
+        this.hoverUv = this.canvasUvToDomainUv(canvasUv);
         this.updateHoverReadoutCoordinates();
         this.updateHoverReadoutVisibility();
 
@@ -316,8 +431,6 @@ export class App {
         }
 
         if (this.pointerMode === 'pan') {
-            const canvasUv = this.getCanvasUv(event);
-
             if (this.panPreviousCanvasUv) {
                 const visibleDomainSize = this.getVisibleDomainSize();
                 this.camera.centerX -=
@@ -348,6 +461,27 @@ export class App {
     }
 
     private handlePointerUp(event: PointerEvent): void {
+        if (event.pointerType === 'touch') {
+            this.activeTouchCanvasUvs.delete(event.pointerId);
+
+            if (this.touchGesture) {
+                if (this.activeTouchCanvasUvs.size >= 2) {
+                    this.beginTouchGesture();
+                    this.updateTouchGesture();
+                } else {
+                    this.touchGesture = null;
+                    this.clearPrimaryInteraction();
+                }
+
+                if (this.gpu.canvas.hasPointerCapture(event.pointerId)) {
+                    this.gpu.canvas.releasePointerCapture(event.pointerId);
+                }
+
+                event.preventDefault();
+                return;
+            }
+        }
+
         if (this.activePointerId !== event.pointerId) {
             return;
         }
@@ -367,15 +501,7 @@ export class App {
             this.gpu.canvas.releasePointerCapture(event.pointerId);
         }
 
-        this.activePointerId = null;
-        this.pointerMode = null;
-        this.pointerCurrentUv = null;
-        this.pointerPreviousUv = null;
-        this.wallDraftStartUv = null;
-        this.wallDraftCurrentUv = null;
-        this.panPreviousCanvasUv = null;
-        this.flow.clearDyeBrush();
-        this.updateCanvasCursor();
+        this.clearPrimaryInteraction();
     }
 
     private handlePointerLeave(): void {
@@ -685,4 +811,15 @@ export class App {
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
+}
+
+function midpoint(a: Point, b: Point): Point {
+    return {
+        x: 0.5 * (a.x + b.x),
+        y: 0.5 * (a.y + b.y)
+    };
+}
+
+function distanceBetween(a: Point, b: Point): number {
+    return Math.hypot(a.x - b.x, a.y - b.y);
 }

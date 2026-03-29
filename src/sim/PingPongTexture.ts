@@ -1,6 +1,8 @@
 export class PingPongTexture {
     private index = 0;
 
+    readonly width: number;
+    readonly height: number;
     private readonly textures: [GPUTexture, GPUTexture];
     private readonly views: [GPUTextureView, GPUTextureView];
 
@@ -11,6 +13,9 @@ export class PingPongTexture {
         format: GPUTextureFormat,
         usage: GPUTextureUsageFlags
     ) {
+        this.width = width;
+        this.height = height;
+
         const createTexture = (): GPUTexture =>
             device.createTexture({
                 size: { width, height },

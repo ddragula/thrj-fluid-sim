@@ -26,17 +26,29 @@ struct Params {
 }
 
 @group(0) @binding(0)
-var velocityTex: texture_2d<f32>;
+var velocityXTex: texture_2d<f32>;
 
 @group(0) @binding(1)
-var divergenceOut: texture_storage_2d<rgba32float, write>;
+var velocityYTex: texture_2d<f32>;
 
 @group(0) @binding(2)
+var divergenceOut: texture_storage_2d<rgba32float, write>;
+
+@group(0) @binding(3)
 var<uniform> params: Params;
 
 
-fn cellCenterPosition(id: vec2u) -> vec2f {
-    return (vec2f(id.xy) + vec2f(0.5)) * vec2f(params.dx, params.dy);
+fn pressureCellCenter(p: vec2i) -> vec2f {
+    return (vec2f(p) + vec2f(0.5)) * vec2f(params.dx, params.dy);
+}
+
+fn isPressureBoundaryIndex(p: vec2i, size: vec2u) -> bool {
+    return (
+        p.x == 0 ||
+        p.y == 0 ||
+        p.x + 1 >= i32(size.x) ||
+        p.y + 1 >= i32(size.y)
+    );
 }
 
 fn isHeaterPosition(position: vec2f) -> bool {
@@ -44,7 +56,7 @@ fn isHeaterPosition(position: vec2f) -> bool {
     return dot(offset, offset) <= params.heaterRadius * params.heaterRadius;
 }
 
-fn isSolidIndex(p: vec2i, size: vec2u) -> bool {
+fn isPressureSolidIndex(p: vec2i, size: vec2u) -> bool {
     if (
         p.x < 0 ||
         p.y < 0 ||
@@ -54,40 +66,114 @@ fn isSolidIndex(p: vec2i, size: vec2u) -> bool {
         return true;
     }
 
-    return isHeaterPosition((vec2f(p) + vec2f(0.5)) * vec2f(params.dx, params.dy));
+    return isHeaterPosition(pressureCellCenter(p));
 }
 
-fn loadVelocity(p: vec2i, size: vec2u) -> vec2f {
-    if (isSolidIndex(p, size)) {
-        return vec2f(0.0);
+fn isVelocityXObstacleFace(id: vec2i, velocitySize: vec2u, pressureSize: vec2u) -> bool {
+    if (
+        id.x < 0 ||
+        id.y < 0 ||
+        id.x >= i32(velocitySize.x) ||
+        id.y >= i32(velocitySize.y)
+    ) {
+        return true;
     }
 
-    return textureLoad(velocityTex, p, 0).xy;
+    let leftCell = vec2i(id.x - 1, id.y);
+    let rightCell = vec2i(id.x, id.y);
+
+    return (
+        !isPressureBoundaryIndex(leftCell, pressureSize) &&
+        !isPressureBoundaryIndex(rightCell, pressureSize) &&
+        (
+            isPressureSolidIndex(leftCell, pressureSize) ||
+            isPressureSolidIndex(rightCell, pressureSize)
+        )
+    );
+}
+
+fn isVelocityYObstacleFace(id: vec2i, velocitySize: vec2u, pressureSize: vec2u) -> bool {
+    if (
+        id.x < 0 ||
+        id.y < 0 ||
+        id.x >= i32(velocitySize.x) ||
+        id.y >= i32(velocitySize.y)
+    ) {
+        return true;
+    }
+
+    let topCell = vec2i(id.x, id.y - 1);
+    let bottomCell = vec2i(id.x, id.y);
+
+    return (
+        !isPressureBoundaryIndex(topCell, pressureSize) &&
+        !isPressureBoundaryIndex(bottomCell, pressureSize) &&
+        (
+            isPressureSolidIndex(topCell, pressureSize) ||
+            isPressureSolidIndex(bottomCell, pressureSize)
+        )
+    );
+}
+
+fn loadVelocityX(id: vec2i, velocitySize: vec2u, pressureSize: vec2u) -> f32 {
+    if (
+        id.x < 0 ||
+        id.y < 0 ||
+        id.x >= i32(velocitySize.x) ||
+        id.y >= i32(velocitySize.y)
+    ) {
+        return 0.0;
+    }
+
+    if (isVelocityXObstacleFace(id, velocitySize, pressureSize)) {
+        return 0.0;
+    }
+
+    return textureLoad(velocityXTex, id, 0).x;
+}
+
+fn loadVelocityY(id: vec2i, velocitySize: vec2u, pressureSize: vec2u) -> f32 {
+    if (
+        id.x < 0 ||
+        id.y < 0 ||
+        id.x >= i32(velocitySize.x) ||
+        id.y >= i32(velocitySize.y)
+    ) {
+        return 0.0;
+    }
+
+    if (isVelocityYObstacleFace(id, velocitySize, pressureSize)) {
+        return 0.0;
+    }
+
+    return textureLoad(velocityYTex, id, 0).x;
 }
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3u) {
-    let sizeU = textureDimensions(velocityTex);
+    let velocityXSize = textureDimensions(velocityXTex);
+    let velocityYSize = textureDimensions(velocityYTex);
+    let pressureSize = vec2u(velocityXSize.x - 1u, velocityXSize.y);
 
-    if (id.x >= sizeU.x || id.y >= sizeU.y) {
+    if (id.x >= pressureSize.x || id.y >= pressureSize.y) {
         return;
     }
 
     let p = vec2i(id.xy);
 
-    if (isSolidIndex(p, sizeU)) {
+    if (isPressureBoundaryIndex(p, pressureSize) || isPressureSolidIndex(p, pressureSize)) {
         textureStore(divergenceOut, p, vec4f(0.0, 0.0, 0.0, 1.0));
         return;
     }
 
-    let left = loadVelocity(p + vec2i(-1, 0), sizeU);
-    let right = loadVelocity(p + vec2i(1, 0), sizeU);
-    let top = loadVelocity(p + vec2i(0, -1), sizeU);
-    let bottom = loadVelocity(p + vec2i(0, 1), sizeU);
+    let leftVelocity = loadVelocityX(vec2i(p.x, p.y), velocityXSize, pressureSize);
+    let rightVelocity = loadVelocityX(vec2i(p.x + 1, p.y), velocityXSize, pressureSize);
+    let topVelocity = loadVelocityY(vec2i(p.x, p.y), velocityYSize, pressureSize);
+    let bottomVelocity = loadVelocityY(vec2i(p.x, p.y + 1), velocityYSize, pressureSize);
 
     let divergence =
-        (right.x - left.x) / (2.0 * params.dx) +
-        (bottom.y - top.y) / (2.0 * params.dy);
+        (rightVelocity - leftVelocity) / params.dx +
+        (bottomVelocity - topVelocity) / params.dy;
 
     textureStore(divergenceOut, p, vec4f(divergence, 0.0, 0.0, 1.0));
 }

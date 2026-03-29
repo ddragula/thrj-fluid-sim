@@ -4,6 +4,7 @@ import advectDyeShader from '../shaders/advect-dye.wgsl?raw';
 import advectTemperatureShader from '../shaders/advect-temperature.wgsl?raw';
 import advectVelocityShader from '../shaders/advect-velocity.wgsl?raw';
 import applyBuoyancyShader from '../shaders/apply-buoyancy.wgsl?raw';
+import composeVelocityShader from '../shaders/compose-velocity.wgsl?raw';
 import computeDivergenceShader from '../shaders/compute-divergence.wgsl?raw';
 import projectVelocityShader from '../shaders/project-velocity.wgsl?raw';
 import solvePressureShader from '../shaders/solve-pressure.wgsl?raw';
@@ -14,8 +15,9 @@ const HEATER_DIAMETER_METERS = 0.015;
 const HEATER_RADIUS_METERS = HEATER_DIAMETER_METERS * 0.5;
 const HEATER_CENTER_X_METERS = DOMAIN_WIDTH_METERS * 0.5;
 const HEATER_CENTER_Y_METERS = DOMAIN_HEIGHT_METERS * 0.86;
-const MAX_SUBSTEPS_PER_FRAME = 12;
+const MAX_SUBSTEPS_PER_FRAME = 16;
 const DIFFUSION_STABILITY_FACTOR = 0.24;
+const BUOYANCY_STABILITY_FACTOR = 0.5;
 const DYE_BRUSH_RADIUS_METERS = 0.005;
 const DYE_BRUSH_STRENGTH = 2.0;
 
@@ -38,15 +40,19 @@ export class FlowEngine {
 
     private readonly dye: PingPongTexture;
     private readonly temperature: PingPongTexture;
-    private readonly velocity: PingPongTexture;
+    private readonly velocityX: PingPongTexture;
+    private readonly velocityY: PingPongTexture;
     private readonly pressure: PingPongTexture;
     private readonly divergenceTexture: GPUTexture;
     private readonly divergenceView: GPUTextureView;
+    private readonly velocityTexture: GPUTexture;
+    private readonly velocityView: GPUTextureView;
 
     private readonly paramsBuffer: GPUBuffer;
 
     private readonly advectVelocityPipeline: GPUComputePipeline;
     private readonly buoyancyPipeline: GPUComputePipeline;
+    private readonly composeVelocityPipeline: GPUComputePipeline;
     private readonly divergencePipeline: GPUComputePipeline;
     private readonly pressurePipeline: GPUComputePipeline;
     private readonly projectVelocityPipeline: GPUComputePipeline;
@@ -94,10 +100,18 @@ export class FlowEngine {
             scalarUsage
         );
 
-        this.velocity = new PingPongTexture(
+        this.velocityX = new PingPongTexture(
+            device,
+            width + 1,
+            height,
+            'rgba32float',
+            vectorUsage
+        );
+
+        this.velocityY = new PingPongTexture(
             device,
             width,
-            height,
+            height + 1,
             'rgba32float',
             vectorUsage
         );
@@ -118,6 +132,14 @@ export class FlowEngine {
 
         this.divergenceView = this.divergenceTexture.createView();
 
+        this.velocityTexture = device.createTexture({
+            size: { width, height },
+            format: 'rgba32float',
+            usage: vectorUsage
+        });
+
+        this.velocityView = this.velocityTexture.createView();
+
         this.paramsBuffer = device.createBuffer({
             size: 96,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
@@ -125,6 +147,7 @@ export class FlowEngine {
 
         this.advectVelocityPipeline = this.createComputePipeline(advectVelocityShader);
         this.buoyancyPipeline = this.createComputePipeline(applyBuoyancyShader);
+        this.composeVelocityPipeline = this.createComputePipeline(composeVelocityShader);
         this.divergencePipeline = this.createComputePipeline(computeDivergenceShader);
         this.pressurePipeline = this.createComputePipeline(solvePressureShader);
         this.projectVelocityPipeline = this.createComputePipeline(projectVelocityShader);
@@ -132,9 +155,11 @@ export class FlowEngine {
         this.dyePipeline = this.createComputePipeline(advectDyeShader);
 
         this.clearField(this.dye, 16);
-        this.clearField(this.velocity, 16);
+        this.clearField(this.velocityX, 16);
+        this.clearField(this.velocityY, 16);
         this.clearField(this.pressure, 16);
-        this.clearTexture(this.divergenceTexture, 16);
+        this.clearTexture(this.divergenceTexture, this.width, this.height, 16);
+        this.clearTexture(this.velocityTexture, this.width, this.height, 16);
         this.initializeTemperatureField();
     }
 
@@ -147,7 +172,7 @@ export class FlowEngine {
     }
 
     getVelocityView(): GPUTextureView {
-        return this.velocity.readView;
+        return this.velocityView;
     }
 
     getDomainAspectRatio(): number {
@@ -175,47 +200,55 @@ export class FlowEngine {
 
             this.writeSimulationParams(substepTime, substepDt, settings);
 
-            const workgroupsX = Math.ceil(this.width / 8);
-            const workgroupsY = Math.ceil(this.height / 8);
+            const scalarWorkgroupsX = Math.ceil(this.width / 8);
+            const scalarWorkgroupsY = Math.ceil(this.height / 8);
+            const velocityWorkgroupsX = Math.ceil((this.width + 1) / 8);
+            const velocityWorkgroupsY = Math.ceil((this.height + 1) / 8);
+            const verticalVelocityWorkgroupsX = Math.ceil(this.width / 8);
+            const verticalVelocityWorkgroupsY = Math.ceil((this.height + 1) / 8);
             const encoder = this.device.createCommandEncoder();
 
             this.encodeComputePass(
                 encoder,
                 this.advectVelocityPipeline,
                 [
-                    { binding: 0, resource: this.velocity.readView },
-                    { binding: 1, resource: this.velocity.writeView },
-                    { binding: 2, resource: { buffer: this.paramsBuffer } }
+                    { binding: 0, resource: this.velocityX.readView },
+                    { binding: 1, resource: this.velocityY.readView },
+                    { binding: 2, resource: this.velocityX.writeView },
+                    { binding: 3, resource: this.velocityY.writeView },
+                    { binding: 4, resource: { buffer: this.paramsBuffer } }
                 ],
-                workgroupsX,
-                workgroupsY
+                velocityWorkgroupsX,
+                velocityWorkgroupsY
             );
-            this.velocity.swap();
+            this.velocityX.swap();
+            this.velocityY.swap();
 
             this.encodeComputePass(
                 encoder,
                 this.buoyancyPipeline,
                 [
                     { binding: 0, resource: this.temperature.readView },
-                    { binding: 1, resource: this.velocity.readView },
-                    { binding: 2, resource: this.velocity.writeView },
+                    { binding: 1, resource: this.velocityY.readView },
+                    { binding: 2, resource: this.velocityY.writeView },
                     { binding: 3, resource: { buffer: this.paramsBuffer } }
                 ],
-                workgroupsX,
-                workgroupsY
+                verticalVelocityWorkgroupsX,
+                verticalVelocityWorkgroupsY
             );
-            this.velocity.swap();
+            this.velocityY.swap();
 
             this.encodeComputePass(
                 encoder,
                 this.divergencePipeline,
                 [
-                    { binding: 0, resource: this.velocity.readView },
-                    { binding: 1, resource: this.divergenceView },
-                    { binding: 2, resource: { buffer: this.paramsBuffer } }
+                    { binding: 0, resource: this.velocityX.readView },
+                    { binding: 1, resource: this.velocityY.readView },
+                    { binding: 2, resource: this.divergenceView },
+                    { binding: 3, resource: { buffer: this.paramsBuffer } }
                 ],
-                workgroupsX,
-                workgroupsY
+                scalarWorkgroupsX,
+                scalarWorkgroupsY
             );
 
             for (let i = 0; i < settings.pressureIterations; i += 1) {
@@ -228,8 +261,8 @@ export class FlowEngine {
                         { binding: 2, resource: this.pressure.writeView },
                         { binding: 3, resource: { buffer: this.paramsBuffer } }
                     ],
-                    workgroupsX,
-                    workgroupsY
+                    scalarWorkgroupsX,
+                    scalarWorkgroupsY
                 );
                 this.pressure.swap();
             }
@@ -238,27 +271,31 @@ export class FlowEngine {
                 encoder,
                 this.projectVelocityPipeline,
                 [
-                    { binding: 0, resource: this.velocity.readView },
-                    { binding: 1, resource: this.pressure.readView },
-                    { binding: 2, resource: this.velocity.writeView },
-                    { binding: 3, resource: { buffer: this.paramsBuffer } }
+                    { binding: 0, resource: this.pressure.readView },
+                    { binding: 1, resource: this.velocityX.readView },
+                    { binding: 2, resource: this.velocityY.readView },
+                    { binding: 3, resource: this.velocityX.writeView },
+                    { binding: 4, resource: this.velocityY.writeView },
+                    { binding: 5, resource: { buffer: this.paramsBuffer } }
                 ],
-                workgroupsX,
-                workgroupsY
+                velocityWorkgroupsX,
+                velocityWorkgroupsY
             );
-            this.velocity.swap();
+            this.velocityX.swap();
+            this.velocityY.swap();
 
             this.encodeComputePass(
                 encoder,
                 this.temperaturePipeline,
                 [
                     { binding: 0, resource: this.temperature.readView },
-                    { binding: 1, resource: this.velocity.readView },
-                    { binding: 2, resource: this.temperature.writeView },
-                    { binding: 3, resource: { buffer: this.paramsBuffer } }
+                    { binding: 1, resource: this.velocityX.readView },
+                    { binding: 2, resource: this.velocityY.readView },
+                    { binding: 3, resource: this.temperature.writeView },
+                    { binding: 4, resource: { buffer: this.paramsBuffer } }
                 ],
-                workgroupsX,
-                workgroupsY
+                scalarWorkgroupsX,
+                scalarWorkgroupsY
             );
             this.temperature.swap();
 
@@ -267,17 +304,33 @@ export class FlowEngine {
                 this.dyePipeline,
                 [
                     { binding: 0, resource: this.dye.readView },
-                    { binding: 1, resource: this.velocity.readView },
-                    { binding: 2, resource: this.dye.writeView },
-                    { binding: 3, resource: { buffer: this.paramsBuffer } }
+                    { binding: 1, resource: this.velocityX.readView },
+                    { binding: 2, resource: this.velocityY.readView },
+                    { binding: 3, resource: this.dye.writeView },
+                    { binding: 4, resource: { buffer: this.paramsBuffer } }
                 ],
-                workgroupsX,
-                workgroupsY
+                scalarWorkgroupsX,
+                scalarWorkgroupsY
             );
             this.dye.swap();
 
             this.device.queue.submit([encoder.finish()]);
         }
+
+        const composeEncoder = this.device.createCommandEncoder();
+        this.encodeComputePass(
+            composeEncoder,
+            this.composeVelocityPipeline,
+            [
+                { binding: 0, resource: this.velocityX.readView },
+                { binding: 1, resource: this.velocityY.readView },
+                { binding: 2, resource: this.velocityView },
+                { binding: 3, resource: { buffer: this.paramsBuffer } }
+            ],
+            Math.ceil(this.width / 8),
+            Math.ceil(this.height / 8)
+        );
+        this.device.queue.submit([composeEncoder.finish()]);
     }
 
     private createComputePipeline(code: string): GPUComputePipeline {
@@ -350,8 +403,8 @@ export class FlowEngine {
     }
 
     private clearField(field: PingPongTexture, bytesPerTexel: number): void {
-        this.clearTexture(field.readTexture, bytesPerTexel);
-        this.clearTexture(field.writeTexture, bytesPerTexel);
+        this.clearTexture(field.readTexture, field.width, field.height, bytesPerTexel);
+        this.clearTexture(field.writeTexture, field.width, field.height, bytesPerTexel);
     }
 
     private initializeTemperatureField(): void {
@@ -368,22 +421,37 @@ export class FlowEngine {
         const inverseGridScale =
             1.0 / (dx * dx) +
             1.0 / (dy * dy);
+        const minGridScale = Math.min(dx, dy);
         const maxDiffusion =
             Math.max(settings.kinematicViscosity, settings.thermalDiffusivity);
-
-        if (maxDiffusion <= 0.0) {
-            return 1;
-        }
+        const buoyancyAcceleration =
+            settings.gravity *
+            settings.thermalExpansionCoefficient *
+            Math.max(settings.heaterTemperature - settings.ambientTemperature, 0.0);
 
         const stableDt =
-            DIFFUSION_STABILITY_FACTOR /
-            (maxDiffusion * inverseGridScale);
+            maxDiffusion > 0.0
+                ? DIFFUSION_STABILITY_FACTOR /
+                    (maxDiffusion * inverseGridScale)
+                : Number.POSITIVE_INFINITY;
+        const buoyancyStableDt =
+            buoyancyAcceleration > 0.0
+                ? Math.sqrt(
+                    (BUOYANCY_STABILITY_FACTOR * minGridScale) /
+                        buoyancyAcceleration
+                )
+                : Number.POSITIVE_INFINITY;
+        const limitedDt = Math.min(stableDt, buoyancyStableDt);
+
+        if (!Number.isFinite(limitedDt) || limitedDt <= 0.0) {
+            return 1;
+        }
 
         return Math.max(
             1,
             Math.min(
                 MAX_SUBSTEPS_PER_FRAME,
-                Math.ceil(dtSeconds / stableDt)
+                Math.ceil(dtSeconds / limitedDt)
             )
         );
     }
@@ -421,14 +489,19 @@ export class FlowEngine {
         );
     }
 
-    private clearTexture(texture: GPUTexture, bytesPerTexel: number): void {
-        const zero = new Uint8Array(this.width * this.height * bytesPerTexel);
+    private clearTexture(
+        texture: GPUTexture,
+        width: number,
+        height: number,
+        bytesPerTexel: number
+    ): void {
+        const zero = new Uint8Array(width * height * bytesPerTexel);
 
         this.device.queue.writeTexture(
             { texture },
             zero,
-            { bytesPerRow: this.width * bytesPerTexel, rowsPerImage: this.height },
-            { width: this.width, height: this.height, depthOrArrayLayers: 1 }
+            { bytesPerRow: width * bytesPerTexel, rowsPerImage: height },
+            { width, height, depthOrArrayLayers: 1 }
         );
     }
 }

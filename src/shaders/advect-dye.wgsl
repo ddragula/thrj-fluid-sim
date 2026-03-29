@@ -29,12 +29,15 @@ struct Params {
 var srcDye: texture_2d<f32>;
 
 @group(0) @binding(1)
-var velocityTex: texture_2d<f32>;
+var velocityXTex: texture_2d<f32>;
 
 @group(0) @binding(2)
-var dstDye: texture_storage_2d<rgba32float, write>;
+var velocityYTex: texture_2d<f32>;
 
 @group(0) @binding(3)
+var dstDye: texture_storage_2d<rgba32float, write>;
+
+@group(0) @binding(4)
 var<uniform> params: Params;
 
 
@@ -72,6 +75,28 @@ fn sampleDye(uv: vec2f) -> f32 {
     return mix(a, b, frac.y);
 }
 
+fn sampleFaceScalar(tex: texture_2d<f32>, sampleIndex: vec2f) -> f32 {
+    let maxIndex = vec2i(textureDimensions(tex)) - vec2i(1);
+    let baseFloor = floor(sampleIndex);
+    let base = vec2i(baseFloor);
+    let frac = sampleIndex - baseFloor;
+
+    let p00 = clamp(base, vec2i(0), maxIndex);
+    let p10 = clamp(base + vec2i(1, 0), vec2i(0), maxIndex);
+    let p01 = clamp(base + vec2i(0, 1), vec2i(0), maxIndex);
+    let p11 = clamp(base + vec2i(1, 1), vec2i(0), maxIndex);
+
+    let s00 = textureLoad(tex, p00, 0).x;
+    let s10 = textureLoad(tex, p10, 0).x;
+    let s01 = textureLoad(tex, p01, 0).x;
+    let s11 = textureLoad(tex, p11, 0).x;
+
+    let a = mix(s00, s10, frac.x);
+    let b = mix(s01, s11, frac.x);
+
+    return mix(a, b, frac.y);
+}
+
 fn domainSizeMeters() -> vec2f {
     return vec2f(params.width * params.dx, params.height * params.dy);
 }
@@ -92,6 +117,24 @@ fn isOuterBoundary(id: vec2u, size: vec2u) -> bool {
 fn isHeaterPosition(position: vec2f) -> bool {
     let offset = position - vec2f(params.heaterCenterX, params.heaterCenterY);
     return dot(offset, offset) <= params.heaterRadius * params.heaterRadius;
+}
+
+fn sampleVelocityX(position: vec2f) -> f32 {
+    return sampleFaceScalar(
+        velocityXTex,
+        vec2f(position.x / params.dx, position.y / params.dy - 0.5)
+    );
+}
+
+fn sampleVelocityY(position: vec2f) -> f32 {
+    return sampleFaceScalar(
+        velocityYTex,
+        vec2f(position.x / params.dx - 0.5, position.y / params.dy)
+    );
+}
+
+fn sampleVelocity(position: vec2f) -> vec2f {
+    return vec2f(sampleVelocityX(position), sampleVelocityY(position));
 }
 
 fn distanceToSegment(point: vec2f, a: vec2f, b: vec2f) -> f32 {
@@ -123,11 +166,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         return;
     }
 
-    let vel = textureLoad(velocityTex, vec2i(id.xy), 0).xy;
-    let prevPosition = position - vel * params.dt;
-    let prevUv = prevPosition / domainSizeMeters();
+    let previousPosition = position - sampleVelocity(position) * params.dt;
+    let previousUv = previousPosition / domainSizeMeters();
 
-    var dye = sampleDye(prevUv);
+    var dye = sampleDye(previousUv);
     dye = dye * exp(-params.dyeDecayRate * params.dt);
 
     if (params.dyeBrushActive > 0.5) {

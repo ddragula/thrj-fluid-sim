@@ -38,12 +38,16 @@ var pressureOut: texture_storage_2d<rgba32float, write>;
 var<uniform> params: Params;
 
 
-fn isOuterBoundary(id: vec2u, size: vec2u) -> bool {
+fn pressureCellCenter(p: vec2i) -> vec2f {
+    return (vec2f(p) + vec2f(0.5)) * vec2f(params.dx, params.dy);
+}
+
+fn isPressureBoundaryIndex(p: vec2i, size: vec2u) -> bool {
     return (
-        id.x == 0u ||
-        id.y == 0u ||
-        id.x + 1u >= size.x ||
-        id.y + 1u >= size.y
+        p.x == 0 ||
+        p.y == 0 ||
+        p.x + 1 >= i32(size.x) ||
+        p.y + 1 >= i32(size.y)
     );
 }
 
@@ -52,7 +56,7 @@ fn isHeaterPosition(position: vec2f) -> bool {
     return dot(offset, offset) <= params.heaterRadius * params.heaterRadius;
 }
 
-fn isSolidIndex(p: vec2i, size: vec2u) -> bool {
+fn isPressureSolidIndex(p: vec2i, size: vec2u) -> bool {
     if (
         p.x < 0 ||
         p.y < 0 ||
@@ -62,15 +66,7 @@ fn isSolidIndex(p: vec2i, size: vec2u) -> bool {
         return true;
     }
 
-    return isHeaterPosition((vec2f(p) + vec2f(0.5)) * vec2f(params.dx, params.dy));
-}
-
-fn loadPressure(tex: texture_2d<f32>, p: vec2i, size: vec2u, fallback: f32) -> f32 {
-    if (isSolidIndex(p, size)) {
-        return fallback;
-    }
-
-    return textureLoad(tex, p, 0).x;
+    return isHeaterPosition(pressureCellCenter(p));
 }
 
 @compute @workgroup_size(8, 8)
@@ -81,29 +77,50 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         return;
     }
 
-    if (isOuterBoundary(id.xy, sizeU) || isSolidIndex(vec2i(id.xy), sizeU)) {
-        textureStore(pressureOut, vec2i(id.xy), vec4f(0.0, 0.0, 0.0, 1.0));
+    let p = vec2i(id.xy);
+
+    if (isPressureBoundaryIndex(p, sizeU) || isPressureSolidIndex(p, sizeU)) {
+        textureStore(pressureOut, p, vec4f(0.0, 0.0, 0.0, 1.0));
         return;
     }
 
-    let p = vec2i(id.xy);
-    let center = textureLoad(pressureTex, p, 0).x;
-    let left = loadPressure(pressureTex, p + vec2i(-1, 0), sizeU, center);
-    let right = loadPressure(pressureTex, p + vec2i(1, 0), sizeU, center);
-    let top = loadPressure(pressureTex, p + vec2i(0, -1), sizeU, center);
-    let bottom = loadPressure(pressureTex, p + vec2i(0, 1), sizeU, center);
+    let inverseDx2 = 1.0 / (params.dx * params.dx);
+    let inverseDy2 = 1.0 / (params.dy * params.dy);
     let divergence = textureLoad(divergenceTex, p, 0).x;
 
-    let dx2 = params.dx * params.dx;
-    let dy2 = params.dy * params.dy;
-    let denominator = 2.0 * (dx2 + dy2);
+    var weightedPressureSum = 0.0;
+    var weight = 0.0;
 
-    let pressure =
-        (
-            (left + right) * dy2 +
-            (top + bottom) * dx2 -
-            divergence * dx2 * dy2
-        ) / denominator;
+    let left = p + vec2i(-1, 0);
+    if (!isPressureSolidIndex(left, sizeU)) {
+        weightedPressureSum = weightedPressureSum + textureLoad(pressureTex, left, 0).x * inverseDx2;
+        weight = weight + inverseDx2;
+    }
+
+    let right = p + vec2i(1, 0);
+    if (!isPressureSolidIndex(right, sizeU)) {
+        weightedPressureSum = weightedPressureSum + textureLoad(pressureTex, right, 0).x * inverseDx2;
+        weight = weight + inverseDx2;
+    }
+
+    let top = p + vec2i(0, -1);
+    if (!isPressureSolidIndex(top, sizeU)) {
+        weightedPressureSum = weightedPressureSum + textureLoad(pressureTex, top, 0).x * inverseDy2;
+        weight = weight + inverseDy2;
+    }
+
+    let bottom = p + vec2i(0, 1);
+    if (!isPressureSolidIndex(bottom, sizeU)) {
+        weightedPressureSum = weightedPressureSum + textureLoad(pressureTex, bottom, 0).x * inverseDy2;
+        weight = weight + inverseDy2;
+    }
+
+    let candidatePressure = select(
+        0.0,
+        (weightedPressureSum - divergence) / weight,
+        weight > 0.0
+    );
+    let pressure = mix(textureLoad(pressureTex, p, 0).x, candidatePressure, 0.82);
 
     textureStore(pressureOut, p, vec4f(pressure, 0.0, 0.0, 1.0));
 }

@@ -29,17 +29,39 @@ body {
     right: 16px;
     z-index: 10;
     width: min(360px, calc(100vw - 24px));
+    max-width: min(360px, calc(100vw - 24px));
     height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    pointer-events: none;
+}
+
+.simulation-panels-viewport--collapsed {
+    pointer-events: none;
+}
+
+.simulation-panels-scroll {
+    width: 100%;
+    height: 100%;
+    padding-top: 56px;
+    padding-bottom: 4px;
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     -ms-overflow-style: none;
     scrollbar-width: none;
-    pointer-events: none;
+    touch-action: pan-y;
+    pointer-events: auto;
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0);
+    transition:
+        opacity 180ms ease,
+        transform 180ms ease,
+        visibility 0s linear 0s;
 }
 
-.simulation-panels-viewport::-webkit-scrollbar {
+.simulation-panels-scroll::-webkit-scrollbar {
     width: 0;
     height: 0;
 }
@@ -50,12 +72,25 @@ body {
     gap: 12px;
     width: 100%;
     min-height: max-content;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.simulation-panels-viewport--collapsed .simulation-panels-scroll {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(12px);
     pointer-events: none;
+    transition:
+        opacity 180ms ease,
+        transform 180ms ease,
+        visibility 0s linear 180ms;
 }
 
 .simulation-panel {
     position: relative;
     width: 100%;
+    max-width: 100%;
     border: 1px solid rgba(165, 195, 220, 0.24);
     border-radius: 16px;
     background: rgba(9, 14, 22, 0.86);
@@ -63,6 +98,49 @@ body {
     backdrop-filter: blur(18px);
     overflow: hidden;
     pointer-events: auto;
+}
+
+.simulation-panels-toggle {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 11;
+    display: inline-flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    width: 44px;
+    height: 44px;
+    padding: 0 11px;
+    border: 1px solid rgba(176, 205, 227, 0.18);
+    border-radius: 14px;
+    background: rgba(8, 12, 19, 0.62);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+    cursor: pointer;
+}
+
+.simulation-panels-toggle span {
+    display: block;
+    width: 100%;
+    height: 2px;
+    border-radius: 999px;
+    background: rgba(237, 243, 251, 0.92);
+    transition:
+        transform 180ms ease,
+        opacity 180ms ease;
+}
+
+.simulation-panels-toggle:not(.simulation-panels-toggle--collapsed) span:nth-child(1) {
+    transform: translateY(7px) rotate(45deg);
+}
+
+.simulation-panels-toggle:not(.simulation-panels-toggle--collapsed) span:nth-child(2) {
+    opacity: 0;
+}
+
+.simulation-panels-toggle:not(.simulation-panels-toggle--collapsed) span:nth-child(3) {
+    transform: translateY(-7px) rotate(-45deg);
 }
 
 .simulation-hint {
@@ -188,6 +266,8 @@ body {
     text-transform: uppercase;
     color: #d7e8f9;
     list-style: none;
+    white-space: nowrap;
+    touch-action: manipulation;
 }
 
 .simulation-panel__summary::-webkit-details-marker {
@@ -407,8 +487,14 @@ body {
         left: 50%;
         right: auto;
         width: min(360px, calc(100vw - 24px));
+        max-width: min(360px, calc(100vw - 24px));
         height: calc(100vh - 24px);
+        max-height: calc(100dvh - 24px);
         transform: translateX(-50%);
+    }
+
+    .simulation-panels-scroll {
+        padding-top: 52px;
     }
 
     .simulation-hint {
@@ -434,6 +520,11 @@ body {
     .simulation-view-reset {
         top: 12px;
         left: 12px;
+    }
+
+    .simulation-panels-toggle {
+        top: 12px;
+        right: 12px;
     }
 
     .simulation-readout {

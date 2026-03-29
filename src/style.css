@@ -319,6 +319,16 @@ body {
     letter-spacing: 0.01em;
 }
 
+.simulation-panel__select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid rgba(176, 205, 227, 0.2);
+    border-radius: 10px;
+    background: rgba(4, 8, 14, 0.65);
+    color: #f1f7ff;
+    font: inherit;
+}
+
 .simulation-panel__inputs {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

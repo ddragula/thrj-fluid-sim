@@ -1,10 +1,20 @@
 import { GpuContext } from '../gpu/GpuContext';
 import { FieldRenderer } from '../render/FieldRenderer';
 import { RenderMode } from '../render/RenderMode';
-import { type DomainEditMode } from '../sim/DomainElement';
+import {
+    resolvePerformanceProfile,
+    type PerformanceProfileLabel,
+    type PerformanceProfilePreference,
+    savePerformanceProfilePreference
+} from './performanceProfile';
+import {
+    type DomainEditMode,
+    type DomainElement
+} from '../sim/DomainElement';
 import { FlowEngine } from '../sim/FlowEngine';
 import { FlowSimulationParams } from '../sim/FlowSimulationParams';
 import { DomainToolsPanel } from '../ui/DomainToolsPanel';
+import { SettingsPanel } from '../ui/SettingsPanel';
 import { SimulationControlPanel } from '../ui/SimulationControlPanel';
 
 type Point = {
@@ -21,17 +31,27 @@ const DEFAULT_CAMERA_ZOOM = 1.0;
 const CAMERA_RESET_EPSILON = 1e-4;
 const HOVER_PROBE_INTERVAL_SECONDS = 0.08;
 
+type AppOptions = {
+    simulationResolution?: number;
+    pressureIterations?: number;
+    performanceProfilePreference?: PerformanceProfilePreference;
+    effectivePerformanceProfileLabel?: PerformanceProfileLabel;
+};
+
 export class App {
     private readonly gpu: GpuContext;
 
     private readonly renderer: FieldRenderer;
-    private readonly flow: FlowEngine;
+    private flow: FlowEngine;
     private readonly controls: SimulationControlPanel;
+    private readonly settingsPanel: SettingsPanel;
     private readonly domainTools: DomainToolsPanel;
     private readonly resetViewButton: HTMLButtonElement;
     private readonly hoverReadout: HTMLDivElement;
     private readonly hoverReadoutCoords: HTMLDivElement;
     private readonly hoverReadoutValue: HTMLDivElement;
+    private performanceProfilePreference: PerformanceProfilePreference;
+    private effectivePerformanceProfileLabel: PerformanceProfileLabel;
     readonly simulationParams: FlowSimulationParams;
 
     private lastTimeSeconds: number | null = null;
@@ -56,11 +76,19 @@ export class App {
         zoom: DEFAULT_CAMERA_ZOOM
     };
 
-    constructor(gpu: GpuContext) {
+    constructor(gpu: GpuContext, options: AppOptions = {}) {
         this.gpu = gpu;
+        this.performanceProfilePreference = options.performanceProfilePreference ?? 'auto';
+        this.effectivePerformanceProfileLabel =
+            options.effectivePerformanceProfileLabel ??
+            resolvePerformanceProfile(this.performanceProfilePreference).label;
 
-        this.flow = new FlowEngine(gpu.device, 512, 512);
-        this.simulationParams = this.flow.simulationParams;
+        this.simulationParams = new FlowSimulationParams();
+        if (options.pressureIterations !== undefined) {
+            this.simulationParams.pressureIterations = options.pressureIterations;
+        }
+        const simulationResolution = Math.max(64, Math.round(options.simulationResolution ?? 512));
+        this.flow = this.createFlowEngine(simulationResolution);
         this.renderer = new FieldRenderer(gpu);
         this.controls = new SimulationControlPanel(
             this.simulationParams,
@@ -68,6 +96,13 @@ export class App {
             (mode) => {
                 this.renderMode = mode;
                 this.invalidateHoverProbe(true);
+            }
+        );
+        this.settingsPanel = new SettingsPanel(
+            this.performanceProfilePreference,
+            this.effectivePerformanceProfileLabel,
+            (preference) => {
+                this.applyPerformanceProfilePreference(preference);
             }
         );
         this.domainTools = new DomainToolsPanel(
@@ -141,6 +176,64 @@ export class App {
 
     private handleResize(): void {
         this.gpu.resize();
+    }
+
+    private createFlowEngine(
+        simulationResolution: number,
+        domainElements?: readonly DomainElement[]
+    ): FlowEngine {
+        return new FlowEngine(
+            this.gpu.device,
+            simulationResolution,
+            simulationResolution,
+            {
+                simulationParams: this.simulationParams,
+                domainElements
+            }
+        );
+    }
+
+    private applyPerformanceProfilePreference(preference: PerformanceProfilePreference): void {
+        const performanceProfile = resolvePerformanceProfile(preference);
+        const currentDomainElements = this.flow.getDomainElements();
+
+        if (
+            this.activePointerId !== null &&
+            this.gpu.canvas.hasPointerCapture(this.activePointerId)
+        ) {
+            this.gpu.canvas.releasePointerCapture(this.activePointerId);
+        }
+
+        savePerformanceProfilePreference(preference);
+        this.performanceProfilePreference = preference;
+        this.effectivePerformanceProfileLabel = performanceProfile.label;
+        this.simulationParams.pressureIterations = performanceProfile.pressureIterations;
+        this.gpu.setMaxDevicePixelRatio(performanceProfile.maxDevicePixelRatio);
+
+        const previousFlow = this.flow;
+        this.flow = this.createFlowEngine(
+            performanceProfile.simulationResolution,
+            currentDomainElements
+        );
+        previousFlow.destroy();
+
+        this.activePointerId = null;
+        this.pointerMode = null;
+        this.pointerCurrentUv = null;
+        this.pointerPreviousUv = null;
+        this.wallDraftStartUv = null;
+        this.wallDraftCurrentUv = null;
+        this.panPreviousCanvasUv = null;
+        this.lastTimeSeconds = null;
+        this.settingsPanel.refresh(
+            this.performanceProfilePreference,
+            this.effectivePerformanceProfileLabel
+        );
+        this.domainTools.refresh(this.flow.getDomainElements().length);
+        this.invalidateHoverProbe(true);
+        this.updateCanvasCursor();
+        this.handleResize();
+        this.updateHoverReadoutCoordinates();
     }
 
     private handlePointerDown(event: PointerEvent): void {
@@ -540,6 +633,10 @@ export class App {
             }
 
             this.updateHoverReadoutValue(valueText);
+        } catch {
+            if (requestId === this.hoverProbeRequestId) {
+                this.updateHoverReadoutValue('');
+            }
         } finally {
             this.hoverProbeInFlight = false;
         }

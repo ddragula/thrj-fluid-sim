@@ -44,4 +44,10 @@ export class PingPongTexture {
     swap() {
         this.index = 1 - this.index;
     }
+
+    destroy(): void {
+        for (const texture of this.textures) {
+            texture.destroy();
+        }
+    }
 }

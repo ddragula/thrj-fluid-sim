@@ -148,12 +148,12 @@ export class SimulationControlPanel {
         initialRenderMode: RenderMode,
         private readonly onRenderModeChange: (mode: RenderMode) => void
     ) {
-        document.querySelector('.simulation-panel')?.remove();
+        document.querySelector('.simulation-controls-panel')?.remove();
         document.querySelector('.simulation-hint')?.remove();
         this.renderMode = initialRenderMode;
 
         this.root = document.createElement('details');
-        this.root.className = 'simulation-panel';
+        this.root.className = 'simulation-panel simulation-controls-panel';
         this.root.open = false;
 
         this.dyeHint = document.createElement('div');

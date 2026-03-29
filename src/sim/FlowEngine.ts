@@ -55,6 +55,11 @@ type DyeBrushState = {
     toUv: Point;
 };
 
+type FlowEngineOptions = {
+    simulationParams?: FlowSimulationParams;
+    domainElements?: readonly DomainElement[];
+};
+
 export class FlowEngine {
     private readonly device: GPUDevice;
     private readonly width: number;
@@ -88,13 +93,16 @@ export class FlowEngine {
     constructor(
         device: GPUDevice,
         width = 512,
-        height = 512
+        height = 512,
+        options: FlowEngineOptions = {}
     ) {
         this.device = device;
         this.width = width;
         this.height = height;
-        this.simulationParams = new FlowSimulationParams();
-        this.domainElements = createDefaultDomainElements();
+        this.simulationParams = options.simulationParams ?? new FlowSimulationParams();
+        this.domainElements = normalizeDomainElements(
+            options.domainElements ?? createDefaultDomainElements()
+        );
 
         const scalarUsage =
             GPUTextureUsage.TEXTURE_BINDING |
@@ -168,6 +176,16 @@ export class FlowEngine {
 
         this.writeDomainElements(this.simulationParams);
         this.resetSimulationFields();
+    }
+
+    destroy(): void {
+        this.dye.destroy();
+        this.temperature.destroy();
+        this.velocity.destroy();
+        this.pressure.destroy();
+        this.divergenceTexture.destroy();
+        this.paramsBuffer.destroy();
+        this.domainElementsBuffer.destroy();
     }
 
     getDyeView(): GPUTextureView {
@@ -817,7 +835,7 @@ function createDefaultDomainElements(): DomainElement[] {
     return elements;
 }
 
-function normalizeDomainElements(elements: DomainElement[]): DomainElement[] {
+function normalizeDomainElements(elements: readonly DomainElement[]): DomainElement[] {
     const normalized: DomainElement[] = [];
 
     for (const element of elements) {

@@ -1,5 +1,9 @@
 import './style.css';
 import { App } from './app/App';
+import {
+    loadPerformanceProfilePreference,
+    resolvePerformanceProfile
+} from './app/performanceProfile';
 import { GpuContext } from './gpu/GpuContext';
 
 async function bootstrap(): Promise<void> {
@@ -9,8 +13,17 @@ async function bootstrap(): Promise<void> {
         throw new Error('Canvas #app not found');
     }
 
-    const gpu = await GpuContext.create(canvas);
-    const app = new App(gpu);
+    const performanceProfilePreference = loadPerformanceProfilePreference();
+    const performanceProfile = resolvePerformanceProfile(performanceProfilePreference);
+    const gpu = await GpuContext.create(canvas, {
+        maxDevicePixelRatio: performanceProfile.maxDevicePixelRatio
+    });
+    const app = new App(gpu, {
+        simulationResolution: performanceProfile.simulationResolution,
+        pressureIterations: performanceProfile.pressureIterations,
+        performanceProfilePreference,
+        effectivePerformanceProfileLabel: performanceProfile.label
+    });
 
     app.start();
 }

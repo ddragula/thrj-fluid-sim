@@ -6,7 +6,6 @@ struct Params {
     dx: f32,
     dy: f32,
     ambientTemperature: f32,
-    temperatureScale: f32,
     gravity: f32,
     thermalExpansion: f32,
     kinematicViscosity: f32,
@@ -15,6 +14,7 @@ struct Params {
     heaterTemperature: f32,
     heaterRadiusX: f32,
     heaterRadiusY: f32,
+    _pad0: f32,
 }
 
 @group(0) @binding(0)
@@ -131,9 +131,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
             (q.y * q.y) / (params.heaterRadiusY * params.heaterRadiusY)
         )
     );
+    let heaterTemperature =
+        params.ambientTemperature +
+        (params.heaterTemperature - params.ambientTemperature) * heater;
+    let maxTemperature = max(params.ambientTemperature, params.heaterTemperature);
 
-    temperature = max(temperature, params.heaterTemperature * heater);
-    temperature = clamp(temperature, params.ambientTemperature, 1.0);
+    temperature = max(temperature, heaterTemperature);
+    temperature = clamp(temperature, params.ambientTemperature, maxTemperature);
 
     textureStore(
         dstTemperature,

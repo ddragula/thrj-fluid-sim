@@ -6,7 +6,6 @@ struct Params {
     dx: f32,
     dy: f32,
     ambientTemperature: f32,
-    temperatureScale: f32,
     gravity: f32,
     thermalExpansion: f32,
     kinematicViscosity: f32,
@@ -15,6 +14,7 @@ struct Params {
     heaterTemperature: f32,
     heaterRadiusX: f32,
     heaterRadiusY: f32,
+    _pad0: f32,
 }
 
 @group(0) @binding(0)
@@ -54,9 +54,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
     let velocity = textureLoad(srcVelocity, vec2i(id.xy), 0).xy;
     let temperature = textureLoad(temperatureTex, vec2i(id.xy), 0).x;
-    let deltaTemperature =
-        max(temperature - params.ambientTemperature, 0.0) *
-        params.temperatureScale;
+    let deltaTemperature = max(temperature - params.ambientTemperature, 0.0);
     let buoyancyAcceleration =
         params.gravity *
         params.thermalExpansion *

@@ -8,7 +8,7 @@ export class FieldRenderer {
 
     constructor(private readonly gpu: GpuContext) {
         this.renderParamsBuffer = gpu.device.createBuffer({
-            size: 16,
+            size: 32,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
@@ -37,15 +37,19 @@ export class FieldRenderer {
         dyeView: GPUTextureView,
         temperatureView: GPUTextureView,
         velocityView: GPUTextureView,
-        mode: RenderMode
+        mode: RenderMode,
+        ambientTemperature: number,
+        heaterTemperature: number
     ): void {
         const { device, context } = this.gpu;
 
-        device.queue.writeBuffer(
-            this.renderParamsBuffer,
-            0,
-            new Uint32Array([mode, 0, 0, 0])
-        );
+        const renderParams = new ArrayBuffer(32);
+        const renderParamsView = new DataView(renderParams);
+        renderParamsView.setUint32(0, mode, true);
+        renderParamsView.setFloat32(16, ambientTemperature, true);
+        renderParamsView.setFloat32(20, heaterTemperature, true);
+
+        device.queue.writeBuffer(this.renderParamsBuffer, 0, renderParams);
 
         const bindGroup = device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),

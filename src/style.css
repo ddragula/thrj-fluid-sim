@@ -1,14 +1,210 @@
 html,
 body {
-  margin: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: #111;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at top, rgba(84, 139, 173, 0.16), transparent 32%),
+        linear-gradient(180deg, #09111a 0%, #04070b 100%);
+    color: #edf3fb;
+    font-family: "Segoe UI", sans-serif;
 }
 
 #app {
-  display: block;
-  width: 100vw;
-  height: 100vh;
+    display: block;
+    width: 100vw;
+    height: 100vh;
+}
+
+.simulation-panel {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+    width: min(360px, calc(100vw - 24px));
+    border: 1px solid rgba(165, 195, 220, 0.24);
+    border-radius: 16px;
+    background: rgba(9, 14, 22, 0.86);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(18px);
+    overflow: hidden;
+}
+
+.simulation-panel:not([open]) {
+    width: auto;
+}
+
+.simulation-panel__summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #d7e8f9;
+    list-style: none;
+}
+
+.simulation-panel__summary::-webkit-details-marker {
+    display: none;
+}
+
+.simulation-panel__summary::after {
+    content: "";
+    width: 9px;
+    height: 9px;
+    margin-left: 12px;
+    border-right: 2px solid rgba(215, 232, 249, 0.92);
+    border-bottom: 2px solid rgba(215, 232, 249, 0.92);
+    transform: rotate(-45deg);
+    transition: transform 140ms ease;
+    flex: 0 0 auto;
+}
+
+.simulation-panel[open] .simulation-panel__summary::after {
+    transform: rotate(45deg);
+}
+
+.simulation-panel__content {
+    display: grid;
+    gap: 12px;
+    padding: 0 16px 16px;
+    max-height: min(78vh, 760px);
+    overflow: auto;
+}
+
+.simulation-panel__derived {
+    margin: 0;
+    color: #98adc4;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.simulation-panel__derived {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(113, 147, 173, 0.1);
+    color: #dce9f6;
+}
+
+.simulation-panel__row {
+    display: grid;
+    gap: 8px;
+}
+
+.simulation-panel__mode-group {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.simulation-panel__mode-button {
+    border: 1px solid rgba(176, 205, 227, 0.18);
+    border-radius: 12px;
+    background: rgba(15, 24, 36, 0.8);
+    color: #bbd1e8;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.simulation-panel__mode-button--active {
+    border-color: rgba(146, 213, 255, 0.45);
+    background: rgba(72, 145, 187, 0.32);
+    color: #eff8ff;
+}
+
+.simulation-panel__label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #dce9f6;
+    letter-spacing: 0.01em;
+}
+
+.simulation-panel__inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.simulation-panel__range {
+    width: 100%;
+    accent-color: #8cd7ff;
+}
+
+.simulation-panel__number-wrap {
+    display: inline-grid;
+    grid-template-columns: minmax(76px, auto) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.simulation-panel__number {
+    width: 88px;
+    padding: 8px 10px;
+    border: 1px solid rgba(176, 205, 227, 0.2);
+    border-radius: 10px;
+    background: rgba(4, 8, 14, 0.65);
+    color: #f1f7ff;
+    font: inherit;
+}
+
+.simulation-panel__unit {
+    font-size: 11px;
+    color: #8ea6bf;
+    white-space: nowrap;
+}
+
+.simulation-panel__actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.simulation-panel__button {
+    border: 1px solid rgba(176, 205, 227, 0.26);
+    border-radius: 999px;
+    background: rgba(89, 150, 184, 0.16);
+    color: #ecf7ff;
+    padding: 9px 14px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.simulation-panel__button:hover {
+    background: rgba(89, 150, 184, 0.28);
+}
+
+@media (max-width: 720px) {
+    .simulation-panel {
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        width: auto;
+    }
+
+    .simulation-panel__inputs {
+        grid-template-columns: 1fr;
+    }
+
+    .simulation-panel__number-wrap {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .simulation-panel__mode-group {
+        grid-template-columns: 1fr;
+    }
 }

@@ -12,6 +12,9 @@ struct RenderParams {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
+    ambientTemperature: f32,
+    heaterTemperature: f32,
+    _pad3: vec2f,
 }
 
 @group(0) @binding(3)
@@ -53,17 +56,26 @@ fn renderDye(p: vec2i) -> vec3f {
 }
 
 fn renderTemperature(p: vec2i) -> vec3f {
-    let temperature = clamp(textureLoad(temperatureTex, p, 0).x, 0.0, 1.0);
+    let temperature = textureLoad(temperatureTex, p, 0).x;
+    let temperatureRange = max(
+        renderParams.heaterTemperature - renderParams.ambientTemperature,
+        1e-5
+    );
+    let normalizedTemperature = clamp(
+        (temperature - renderParams.ambientTemperature) / temperatureRange,
+        0.0,
+        1.0
+    );
     let background = vec3f(0.01, 0.014, 0.024);
     let cold = vec3f(0.06, 0.18, 0.40);
     let warm = vec3f(0.95, 0.38, 0.08);
     let hot = vec3f(1.0, 0.96, 0.72);
 
-    var color = mix(cold, warm, smoothstep(0.0, 0.65, temperature));
-    color = mix(color, hot, smoothstep(0.45, 1.0, temperature));
-    color = mix(background, color, smoothstep(0.02, 0.95, temperature));
+    var color = mix(cold, warm, smoothstep(0.0, 0.65, normalizedTemperature));
+    color = mix(color, hot, smoothstep(0.45, 1.0, normalizedTemperature));
+    color = mix(background, color, smoothstep(0.02, 0.95, normalizedTemperature));
 
-    let glow = smoothstep(0.35, 1.0, temperature);
+    let glow = smoothstep(0.35, 1.0, normalizedTemperature);
     return color + glow * glow * vec3f(0.28, 0.12, 0.02);
 }
 

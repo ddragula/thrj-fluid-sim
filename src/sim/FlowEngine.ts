@@ -1,4 +1,5 @@
 import { PingPongTexture } from './PingPongTexture';
+import { FlowSimulationParams } from './FlowSimulationParams';
 import advectDyeShader from '../shaders/advect-dye.wgsl?raw';
 import advectTemperatureShader from '../shaders/advect-temperature.wgsl?raw';
 import advectVelocityShader from '../shaders/advect-velocity.wgsl?raw';
@@ -11,7 +12,7 @@ export class FlowEngine {
     private readonly device: GPUDevice;
     private readonly width: number;
     private readonly height: number;
-    private readonly pressureIterations = 32;
+    readonly simulationParams: FlowSimulationParams;
 
     private readonly dye: PingPongTexture;
     private readonly temperature: PingPongTexture;
@@ -38,6 +39,7 @@ export class FlowEngine {
         this.device = device;
         this.width = width;
         this.height = height;
+        this.simulationParams = new FlowSimulationParams();
 
         const scalarUsage =
             GPUTextureUsage.TEXTURE_BINDING |
@@ -122,7 +124,9 @@ export class FlowEngine {
     }
 
     step(timeSeconds: number, dtSeconds: number): void {
-        this.writeSimulationParams(timeSeconds, dtSeconds);
+        const settings = this.simulationParams;
+
+        this.writeSimulationParams(timeSeconds, dtSeconds, settings);
 
         const workgroupsX = Math.ceil(this.width / 8);
         const workgroupsY = Math.ceil(this.height / 8);
@@ -167,7 +171,7 @@ export class FlowEngine {
             workgroupsY
         );
 
-        for (let i = 0; i < this.pressureIterations; i += 1) {
+        for (let i = 0; i < settings.pressureIterations; i += 1) {
             this.encodeComputePass(
                 encoder,
                 this.pressurePipeline,
@@ -238,7 +242,11 @@ export class FlowEngine {
         });
     }
 
-    private writeSimulationParams(timeSeconds: number, dtSeconds: number): void {
+    private writeSimulationParams(
+        timeSeconds: number,
+        dtSeconds: number,
+        settings: FlowSimulationParams
+    ): void {
         this.device.queue.writeBuffer(
             this.paramsBuffer,
             0,
@@ -249,16 +257,16 @@ export class FlowEngine {
                 this.height,
                 1 / this.width,
                 1 / this.height,
-                0.0,
-                80.0,
-                9.81,
-                1 / 293.15,
-                1.56e-5,
-                2.2e-5,
-                0.24,
-                0.85,
-                0.055,
-                0.020
+                settings.ambientTemperature,
+                settings.gravity,
+                settings.thermalExpansionCoefficient,
+                settings.kinematicViscosity,
+                settings.thermalDiffusivity,
+                settings.dyeDecayRate,
+                settings.heaterTemperature,
+                settings.heaterRadiusX,
+                settings.heaterRadiusY,
+                0.0
             ])
         );
     }

@@ -6,7 +6,6 @@ struct Params {
     dx: f32,
     dy: f32,
     ambientTemperature: f32,
-    temperatureScale: f32,
     gravity: f32,
     thermalExpansion: f32,
     kinematicViscosity: f32,
@@ -15,6 +14,7 @@ struct Params {
     heaterTemperature: f32,
     heaterRadiusX: f32,
     heaterRadiusY: f32,
+    _pad0: f32,
 }
 
 @group(0) @binding(0)

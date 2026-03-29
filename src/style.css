@@ -17,11 +17,19 @@ body {
     height: 100vh;
 }
 
-.simulation-panel {
+.simulation-panels {
     position: fixed;
     top: 16px;
     right: 16px;
     z-index: 10;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    pointer-events: none;
+}
+
+.simulation-panel {
+    position: relative;
     width: min(360px, calc(100vw - 24px));
     border: 1px solid rgba(165, 195, 220, 0.24);
     border-radius: 16px;
@@ -29,6 +37,7 @@ body {
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
     backdrop-filter: blur(18px);
     overflow: hidden;
+    pointer-events: auto;
 }
 
 .simulation-hint {
@@ -356,10 +365,15 @@ body {
 }
 
 @media (max-width: 720px) {
-    .simulation-panel {
+    .simulation-panels {
         top: 12px;
         left: 12px;
         right: 12px;
+        display: grid;
+        gap: 12px;
+    }
+
+    .simulation-panel {
         width: auto;
     }
 

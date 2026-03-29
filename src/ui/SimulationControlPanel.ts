@@ -3,12 +3,12 @@ import {
     type FlowSimulationParamValues,
     FlowSimulationParams
 } from '../sim/FlowSimulationParams';
-import { type DomainEditMode } from '../sim/DomainElement';
 import { RenderMode } from '../render/RenderMode';
 import {
     TEMPERATURE_SCALE_STOPS,
     getTemperatureDisplayRange
 } from '../render/temperatureScale';
+import { getPanelsHost } from './panelHost';
 
 type ParamControlDescriptor = {
     key: FlowSimulationParamKey;
@@ -88,18 +88,11 @@ const RENDER_MODE_OPTIONS = [
     { mode: RenderMode.Velocity, label: 'Velocity' }
 ] as const;
 
-const EDIT_MODE_OPTIONS = [
-    { mode: 'navigate', label: 'Navigate' },
-    { mode: 'hotCircle', label: 'Hot Circle' },
-    { mode: 'ambientWall', label: 'Ambient Wall' }
-] as const satisfies ReadonlyArray<{ mode: DomainEditMode; label: string }>;
-
 export class SimulationControlPanel {
     private readonly root: HTMLDetailsElement;
     private readonly dyeHint: HTMLDivElement;
     private readonly controls = new Map<FlowSimulationParamKey, ParamControlElements>();
     private readonly modeButtons = new Map<RenderMode, HTMLButtonElement>();
-    private readonly editModeButtons = new Map<DomainEditMode, HTMLButtonElement>();
     private readonly betaValue: HTMLSpanElement;
     private readonly temperatureLegend: HTMLDivElement;
     private temperatureLegendBar!: HTMLDivElement;
@@ -108,21 +101,15 @@ export class SimulationControlPanel {
     private temperatureLegendContext!: HTMLSpanElement;
     private dyeHintDismissed = false;
     private renderMode: RenderMode;
-    private domainEditMode: DomainEditMode;
 
     constructor(
         private readonly params: FlowSimulationParams,
         initialRenderMode: RenderMode,
-        private readonly onRenderModeChange: (mode: RenderMode) => void,
-        initialDomainEditMode: DomainEditMode,
-        private readonly onDomainEditModeChange: (mode: DomainEditMode) => void,
-        private readonly onClearDomainElements: () => void,
-        private readonly onResetDomainElements: () => void
+        private readonly onRenderModeChange: (mode: RenderMode) => void
     ) {
         document.querySelector('.simulation-panel')?.remove();
         document.querySelector('.simulation-hint')?.remove();
         this.renderMode = initialRenderMode;
-        this.domainEditMode = initialDomainEditMode;
 
         this.root = document.createElement('details');
         this.root.className = 'simulation-panel';
@@ -142,7 +129,6 @@ export class SimulationControlPanel {
         this.root.appendChild(content);
 
         content.appendChild(this.createRenderModeSection());
-        content.appendChild(this.createDomainEditSection());
         this.temperatureLegend = this.createTemperatureLegendSection();
         content.appendChild(this.temperatureLegend);
 
@@ -170,26 +156,10 @@ export class SimulationControlPanel {
         });
         actions.appendChild(resetButton);
 
-        const clearElementsButton = document.createElement('button');
-        clearElementsButton.type = 'button';
-        clearElementsButton.className = 'simulation-panel__button simulation-panel__button--secondary';
-        clearElementsButton.textContent = 'Clear Elements';
-        clearElementsButton.addEventListener('click', () => {
-            this.onClearDomainElements();
-        });
-        actions.appendChild(clearElementsButton);
-
-        const resetElementsButton = document.createElement('button');
-        resetElementsButton.type = 'button';
-        resetElementsButton.className = 'simulation-panel__button simulation-panel__button--secondary';
-        resetElementsButton.textContent = 'Reset Elements';
-        resetElementsButton.addEventListener('click', () => {
-            this.onResetDomainElements();
-        });
-        actions.appendChild(resetElementsButton);
-
         content.appendChild(actions);
-        document.body.appendChild(this.root);
+
+        const host = getPanelsHost();
+        host.appendChild(this.root);
         document.body.appendChild(this.dyeHint);
 
         this.refresh();
@@ -293,6 +263,35 @@ export class SimulationControlPanel {
         return row;
     }
 
+    private createRenderModeSection(): HTMLElement {
+        const section = document.createElement('div');
+        section.className = 'simulation-panel__row';
+
+        const label = document.createElement('div');
+        label.className = 'simulation-panel__label';
+        label.textContent = 'View';
+        section.appendChild(label);
+
+        const modeGroup = document.createElement('div');
+        modeGroup.className = 'simulation-panel__mode-group';
+
+        for (const option of RENDER_MODE_OPTIONS) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'simulation-panel__mode-button';
+            button.textContent = option.label;
+            button.addEventListener('click', () => {
+                this.setRenderMode(option.mode);
+                this.onRenderModeChange(option.mode);
+            });
+            this.modeButtons.set(option.mode, button);
+            modeGroup.appendChild(button);
+        }
+
+        section.appendChild(modeGroup);
+        return section;
+    }
+
     private applyValue(key: FlowSimulationParamKey, value: number): void {
         if (!Number.isFinite(value)) {
             this.refresh();
@@ -334,69 +333,6 @@ export class SimulationControlPanel {
         this.updateModeButtons();
     }
 
-    private createRenderModeSection(): HTMLElement {
-        const section = document.createElement('div');
-        section.className = 'simulation-panel__row';
-
-        const label = document.createElement('div');
-        label.className = 'simulation-panel__label';
-        label.textContent = 'View';
-        section.appendChild(label);
-
-        const modeGroup = document.createElement('div');
-        modeGroup.className = 'simulation-panel__mode-group';
-
-        for (const option of RENDER_MODE_OPTIONS) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'simulation-panel__mode-button';
-            button.textContent = option.label;
-            button.addEventListener('click', () => {
-                this.setRenderMode(option.mode);
-                this.onRenderModeChange(option.mode);
-            });
-            this.modeButtons.set(option.mode, button);
-            modeGroup.appendChild(button);
-        }
-
-        section.appendChild(modeGroup);
-        return section;
-    }
-
-    private createDomainEditSection(): HTMLElement {
-        const section = document.createElement('div');
-        section.className = 'simulation-panel__row';
-
-        const label = document.createElement('div');
-        label.className = 'simulation-panel__label';
-        label.textContent = 'Domain Tools';
-        section.appendChild(label);
-
-        const modeGroup = document.createElement('div');
-        modeGroup.className = 'simulation-panel__mode-group';
-
-        for (const option of EDIT_MODE_OPTIONS) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'simulation-panel__mode-button';
-            button.textContent = option.label;
-            button.addEventListener('click', () => {
-                this.setDomainEditMode(option.mode);
-                this.onDomainEditModeChange(option.mode);
-            });
-            this.editModeButtons.set(option.mode, button);
-            modeGroup.appendChild(button);
-        }
-
-        const help = document.createElement('div');
-        help.className = 'simulation-panel__help';
-        help.textContent = 'Click to place hot circles. Drag to place ambient walls.';
-
-        section.appendChild(modeGroup);
-        section.appendChild(help);
-        return section;
-    }
-
     private updateModeButtons(): void {
         this.temperatureLegend.classList.toggle(
             'simulation-panel__legend--hidden',
@@ -411,14 +347,6 @@ export class SimulationControlPanel {
             button.classList.toggle('simulation-panel__mode-button--active', mode === this.renderMode);
             button.setAttribute('aria-pressed', mode === this.renderMode ? 'true' : 'false');
         }
-
-        for (const [mode, button] of this.editModeButtons) {
-            button.classList.toggle(
-                'simulation-panel__mode-button--active',
-                mode === this.domainEditMode
-            );
-            button.setAttribute('aria-pressed', mode === this.domainEditMode ? 'true' : 'false');
-        }
     }
 
     private setRenderMode(mode: RenderMode): void {
@@ -428,11 +356,6 @@ export class SimulationControlPanel {
             this.dyeHintDismissed = false;
         }
 
-        this.updateModeButtons();
-    }
-
-    private setDomainEditMode(mode: DomainEditMode): void {
-        this.domainEditMode = mode;
         this.updateModeButtons();
     }
 

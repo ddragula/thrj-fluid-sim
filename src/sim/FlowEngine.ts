@@ -12,14 +12,28 @@ import computeDivergenceShader from '../shaders/compute-divergence.wgsl?raw';
 import projectVelocityShader from '../shaders/project-velocity.wgsl?raw';
 import solvePressureShader from '../shaders/solve-pressure.wgsl?raw';
 
-const DOMAIN_WIDTH_METERS = 0.24;
-const DOMAIN_HEIGHT_METERS = 0.40;
+const DOMAIN_WIDTH_METERS = 1;
+const DOMAIN_HEIGHT_METERS = 1.2;
 const HEATER_DIAMETER_METERS = 0.015;
 const HEATER_RADIUS_METERS = HEATER_DIAMETER_METERS * 0.5;
-const HEATER_CENTER_X_METERS = DOMAIN_WIDTH_METERS * 0.5;
-const HEATER_CENTER_Y_METERS = DOMAIN_HEIGHT_METERS * 0.86;
 const AMBIENT_WALL_THICKNESS_METERS = 0.008;
 const MIN_AMBIENT_WALL_LENGTH_METERS = 0.002;
+const WL352_CHANNEL_WALL_THICKNESS_METERS = 0.004;
+const WL352_CHANNEL_WIDTH_METERS = 0.12;
+const WL352_CHANNEL_HEIGHT_METERS = 1.0;
+const WL352_CHANNEL_CENTER_X_METERS = DOMAIN_WIDTH_METERS * 0.5;
+const WL352_CHANNEL_LEFT_WALL_X_METERS =
+    WL352_CHANNEL_CENTER_X_METERS - 0.5 * WL352_CHANNEL_WIDTH_METERS;
+const WL352_CHANNEL_RIGHT_WALL_X_METERS =
+    WL352_CHANNEL_CENTER_X_METERS + 0.5 * WL352_CHANNEL_WIDTH_METERS;
+const WL352_CHANNEL_BOTTOM_Y_METERS =
+    0.5 * (DOMAIN_HEIGHT_METERS - WL352_CHANNEL_HEIGHT_METERS);
+const WL352_CHANNEL_TOP_Y_METERS =
+    WL352_CHANNEL_BOTTOM_Y_METERS + WL352_CHANNEL_HEIGHT_METERS;
+const WL352_BUNDLE_CENTER_X_METERS = WL352_CHANNEL_CENTER_X_METERS;
+const WL352_BUNDLE_CENTER_Y_METERS = DOMAIN_HEIGHT_METERS * 0.80 - 0.20;
+const WL352_ROD_HORIZONTAL_PITCH_METERS = 0.03;
+const WL352_ROD_VERTICAL_PITCH_METERS = 0.02;
 const MAX_SUBSTEPS_PER_FRAME = 24;
 const SUBSTEP_SAFETY_FACTOR = 0.05;
 const BUOYANCY_DISPLACEMENT_FRACTION = 0.35;
@@ -736,16 +750,64 @@ export class FlowEngine {
 }
 
 function createDefaultDomainElements(): DomainElement[] {
-    return [
+    const elements: DomainElement[] = [
         {
-            kind: 'hotCircle',
-            center: {
-                x: HEATER_CENTER_X_METERS,
-                y: HEATER_CENTER_Y_METERS
+            kind: 'ambientWall',
+            start: {
+                x: WL352_CHANNEL_LEFT_WALL_X_METERS,
+                y: WL352_CHANNEL_BOTTOM_Y_METERS
             },
-            radius: HEATER_RADIUS_METERS
+            end: {
+                x: WL352_CHANNEL_LEFT_WALL_X_METERS,
+                y: WL352_CHANNEL_TOP_Y_METERS
+            },
+            thickness: WL352_CHANNEL_WALL_THICKNESS_METERS
+        },
+        {
+            kind: 'ambientWall',
+            start: {
+                x: WL352_CHANNEL_RIGHT_WALL_X_METERS,
+                y: WL352_CHANNEL_BOTTOM_Y_METERS
+            },
+            end: {
+                x: WL352_CHANNEL_RIGHT_WALL_X_METERS,
+                y: WL352_CHANNEL_TOP_Y_METERS
+            },
+            thickness: WL352_CHANNEL_WALL_THICKNESS_METERS
         }
     ];
+
+    const rowCenterOffsets = [
+        -2 * WL352_ROD_VERTICAL_PITCH_METERS,
+        -1 * WL352_ROD_VERTICAL_PITCH_METERS,
+        0.0,
+        1 * WL352_ROD_VERTICAL_PITCH_METERS,
+        2 * WL352_ROD_VERTICAL_PITCH_METERS
+    ];
+    const halfPitchX = 0.5 * WL352_ROD_HORIZONTAL_PITCH_METERS;
+    const fullPitchX = WL352_ROD_HORIZONTAL_PITCH_METERS;
+    const rowXOffsets = [
+        [-fullPitchX, 0.0, fullPitchX],
+        [-1.5 * fullPitchX, -halfPitchX, halfPitchX, 1.5 * fullPitchX],
+        [-fullPitchX, 0.0, fullPitchX],
+        [-1.5 * fullPitchX, -halfPitchX, halfPitchX, 1.5 * fullPitchX],
+        [-fullPitchX, 0.0, fullPitchX]
+    ];
+
+    for (let rowIndex = 0; rowIndex < rowCenterOffsets.length; rowIndex += 1) {
+        for (const xOffset of rowXOffsets[rowIndex]) {
+            elements.push({
+                kind: 'hotCircle',
+                center: {
+                    x: WL352_BUNDLE_CENTER_X_METERS + xOffset,
+                    y: WL352_BUNDLE_CENTER_Y_METERS + rowCenterOffsets[rowIndex]
+                },
+                radius: HEATER_RADIUS_METERS
+            });
+        }
+    }
+
+    return elements;
 }
 
 function normalizeDomainElements(elements: DomainElement[]): DomainElement[] {

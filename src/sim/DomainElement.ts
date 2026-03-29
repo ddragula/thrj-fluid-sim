@@ -20,4 +20,4 @@ export type HotCircleElement = {
 export type DomainElement = AmbientWallElement | HotCircleElement;
 export type DomainEditMode = 'navigate' | 'hotCircle' | 'ambientWall';
 
-export const MAX_DOMAIN_ELEMENTS = 16;
+export const MAX_DOMAIN_ELEMENTS = 32;

@@ -4,6 +4,7 @@ import { RenderMode } from '../render/RenderMode';
 import { type DomainEditMode } from '../sim/DomainElement';
 import { FlowEngine } from '../sim/FlowEngine';
 import { FlowSimulationParams } from '../sim/FlowSimulationParams';
+import { DomainToolsPanel } from '../ui/DomainToolsPanel';
 import { SimulationControlPanel } from '../ui/SimulationControlPanel';
 
 type Point = {
@@ -26,6 +27,7 @@ export class App {
     private readonly renderer: FieldRenderer;
     private readonly flow: FlowEngine;
     private readonly controls: SimulationControlPanel;
+    private readonly domainTools: DomainToolsPanel;
     private readonly resetViewButton: HTMLButtonElement;
     private readonly hoverReadout: HTMLDivElement;
     private readonly hoverReadoutCoords: HTMLDivElement;
@@ -66,18 +68,23 @@ export class App {
             (mode) => {
                 this.renderMode = mode;
                 this.invalidateHoverProbe(true);
-            },
+            }
+        );
+        this.domainTools = new DomainToolsPanel(
             this.domainEditMode,
+            this.flow.getDomainElements().length,
             (mode) => {
                 this.domainEditMode = mode;
                 this.updateCanvasCursor();
             },
             () => {
                 this.flow.clearDomainElements();
+                this.domainTools.refresh(this.flow.getDomainElements().length);
                 this.invalidateHoverProbe(true);
             },
             () => {
                 this.flow.resetDomainElements();
+                this.domainTools.refresh(this.flow.getDomainElements().length);
                 this.invalidateHoverProbe(true);
             }
         );
@@ -165,8 +172,10 @@ export class App {
                 return;
             }
 
-            this.flow.addHotCircleAtUv(uv);
-            this.invalidateHoverProbe(true);
+            if (this.flow.addHotCircleAtUv(uv)) {
+                this.domainTools.refresh(this.flow.getDomainElements().length);
+                this.invalidateHoverProbe(true);
+            }
             event.preventDefault();
             return;
         }
@@ -255,8 +264,10 @@ export class App {
             this.wallDraftStartUv &&
             this.wallDraftCurrentUv
         ) {
-            this.flow.addAmbientWallAtUv(this.wallDraftStartUv, this.wallDraftCurrentUv);
-            this.invalidateHoverProbe(true);
+            if (this.flow.addAmbientWallAtUv(this.wallDraftStartUv, this.wallDraftCurrentUv)) {
+                this.domainTools.refresh(this.flow.getDomainElements().length);
+                this.invalidateHoverProbe(true);
+            }
         }
 
         if (this.gpu.canvas.hasPointerCapture(event.pointerId)) {

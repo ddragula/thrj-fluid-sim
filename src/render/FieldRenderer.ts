@@ -1,14 +1,19 @@
 import { GpuContext } from '../gpu/GpuContext';
-import presentDensityShader from '../shaders/present-density.wgsl?raw';
+import { RenderMode } from './RenderMode';
+import presentFieldsShader from '../shaders/present-fields.wgsl?raw';
 
 export class FieldRenderer {
-    private readonly gpu: GpuContext;
+    private readonly renderParamsBuffer: GPUBuffer;
     private readonly pipeline: GPURenderPipeline;
 
-    constructor(gpu: GpuContext) {
-        this.gpu = gpu;
+    constructor(private readonly gpu: GpuContext) {
+        this.renderParamsBuffer = gpu.device.createBuffer({
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
         const module = gpu.device.createShaderModule({
-            code: presentDensityShader
+            code: presentFieldsShader
         });
 
         this.pipeline = gpu.device.createRenderPipeline({
@@ -28,15 +33,28 @@ export class FieldRenderer {
         });
     }
 
-    render(fieldView: GPUTextureView): void {
+    render(
+        dyeView: GPUTextureView,
+        temperatureView: GPUTextureView,
+        velocityView: GPUTextureView,
+        mode: RenderMode
+    ): void {
         const { device, context } = this.gpu;
+
+        device.queue.writeBuffer(
+            this.renderParamsBuffer,
+            0,
+            new Uint32Array([mode, 0, 0, 0])
+        );
 
         const bindGroup = device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),
-            entries: [{
-                binding: 0,
-                resource: fieldView
-            }]
+            entries: [
+                { binding: 0, resource: dyeView },
+                { binding: 1, resource: temperatureView },
+                { binding: 2, resource: velocityView },
+                { binding: 3, resource: { buffer: this.renderParamsBuffer } }
+            ]
         });
 
         const encoder = device.createCommandEncoder();

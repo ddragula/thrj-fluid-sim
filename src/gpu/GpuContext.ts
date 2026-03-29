@@ -28,7 +28,7 @@ export class GpuContext {
 
         const device = await adapter.requestDevice();
 
-        const context = canvas.getContext('webgpu');
+        const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
         if (!context) {
             throw new Error('Failed to acquire WebGPU canvas context');
         }

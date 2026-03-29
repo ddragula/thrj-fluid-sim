@@ -17,6 +17,7 @@ const ZOOM_SENSITIVITY = 0.0015;
 const DEFAULT_CAMERA_CENTER = 0.5;
 const DEFAULT_CAMERA_ZOOM = 1.0;
 const CAMERA_RESET_EPSILON = 1e-4;
+const HOVER_PROBE_INTERVAL_SECONDS = 0.08;
 
 export class App {
     private readonly gpu: GpuContext;
@@ -25,6 +26,9 @@ export class App {
     private readonly flow: FlowEngine;
     private readonly controls: SimulationControlPanel;
     private readonly resetViewButton: HTMLButtonElement;
+    private readonly hoverReadout: HTMLDivElement;
+    private readonly hoverReadoutCoords: HTMLDivElement;
+    private readonly hoverReadoutValue: HTMLDivElement;
     readonly simulationParams: FlowSimulationParams;
 
     private lastTimeSeconds: number | null = null;
@@ -34,8 +38,12 @@ export class App {
     private pointerCurrentUv: Point | null = null;
     private pointerPreviousUv: Point | null = null;
     private panPreviousCanvasUv: Point | null = null;
+    private hoverUv: Point | null = null;
     private ctrlPressed = false;
     private shiftPressed = false;
+    private hoverProbeRequestId = 0;
+    private hoverProbeInFlight = false;
+    private hoverProbeLastRequestTime = Number.NEGATIVE_INFINITY;
     private readonly camera = {
         centerX: DEFAULT_CAMERA_CENTER,
         centerY: DEFAULT_CAMERA_CENTER,
@@ -53,6 +61,7 @@ export class App {
             this.renderMode,
             (mode) => {
                 this.renderMode = mode;
+                this.invalidateHoverProbe(true);
             }
         );
         document.querySelector('.simulation-view-reset')?.remove();
@@ -64,11 +73,22 @@ export class App {
             this.resetCamera();
         });
         document.body.appendChild(this.resetViewButton);
+        document.querySelector('.simulation-readout')?.remove();
+        this.hoverReadout = document.createElement('div');
+        this.hoverReadout.className = 'simulation-readout simulation-readout--hidden';
+        this.hoverReadoutCoords = document.createElement('div');
+        this.hoverReadoutCoords.className = 'simulation-readout__coords';
+        this.hoverReadoutValue = document.createElement('div');
+        this.hoverReadoutValue.className = 'simulation-readout__value';
+        this.hoverReadout.appendChild(this.hoverReadoutCoords);
+        this.hoverReadout.appendChild(this.hoverReadoutValue);
+        document.body.appendChild(this.hoverReadout);
 
         this.handleResize = this.handleResize.bind(this);
         this.handlePointerDown = this.handlePointerDown.bind(this);
         this.handlePointerMove = this.handlePointerMove.bind(this);
         this.handlePointerUp = this.handlePointerUp.bind(this);
+        this.handlePointerLeave = this.handlePointerLeave.bind(this);
         this.handleAuxClick = this.handleAuxClick.bind(this);
         this.handleKeyDown = this.handleKeyDown.bind(this);
         this.handleKeyUp = this.handleKeyUp.bind(this);
@@ -86,6 +106,7 @@ export class App {
         this.gpu.canvas.addEventListener('pointermove', this.handlePointerMove);
         this.gpu.canvas.addEventListener('pointerup', this.handlePointerUp);
         this.gpu.canvas.addEventListener('pointercancel', this.handlePointerUp);
+        this.gpu.canvas.addEventListener('pointerleave', this.handlePointerLeave);
         this.gpu.canvas.addEventListener('auxclick', this.handleAuxClick);
         this.gpu.canvas.addEventListener('wheel', this.handleWheel, { passive: false });
         this.handleResize();
@@ -133,6 +154,10 @@ export class App {
     }
 
     private handlePointerMove(event: PointerEvent): void {
+        this.hoverUv = this.canvasUvToDomainUv(this.getCanvasUv(event));
+        this.updateHoverReadoutCoordinates();
+        this.updateHoverReadoutVisibility();
+
         if (this.activePointerId !== event.pointerId) {
             return;
         }
@@ -180,6 +205,12 @@ export class App {
         this.panPreviousCanvasUv = null;
         this.flow.clearDyeBrush();
         this.updateCanvasCursor();
+    }
+
+    private handlePointerLeave(): void {
+        this.hoverUv = null;
+        this.invalidateHoverProbe(true);
+        this.updateHoverReadoutVisibility();
     }
 
     private handleAuxClick(event: MouseEvent): void {
@@ -267,6 +298,7 @@ export class App {
             this.camera.centerY,
             this.camera.zoom
         );
+        this.scheduleHoverProbe(nowSeconds);
 
         requestAnimationFrame(this.frame);
     }
@@ -355,6 +387,93 @@ export class App {
             'simulation-view-reset--hidden',
             this.isCameraAtDefault()
         );
+    }
+
+    private scheduleHoverProbe(nowSeconds: number): void {
+        if (!this.hoverUv) {
+            this.updateHoverReadoutVisibility();
+            return;
+        }
+
+        if (this.hoverProbeInFlight) {
+            return;
+        }
+
+        if (nowSeconds - this.hoverProbeLastRequestTime < HOVER_PROBE_INTERVAL_SECONDS) {
+            return;
+        }
+
+        const requestId = this.hoverProbeRequestId;
+        const uv = { ...this.hoverUv };
+        const mode = this.renderMode;
+
+        this.hoverProbeInFlight = true;
+        this.hoverProbeLastRequestTime = nowSeconds;
+
+        void this.requestHoverProbe(requestId, uv, mode);
+    }
+
+    private async requestHoverProbe(
+        requestId: number,
+        uv: Point,
+        mode: RenderMode
+    ): Promise<void> {
+        try {
+            let valueText = '';
+
+            if (mode === RenderMode.Dye) {
+                const value = await this.flow.sampleDyeAtUv(uv);
+                valueText = `Dye ${value.toFixed(3)}`;
+            } else if (mode === RenderMode.Temperature) {
+                const value = await this.flow.sampleTemperatureAtUv(uv);
+                valueText = `Temperature ${value.toFixed(2)} °C`;
+            } else {
+                const value = await this.flow.sampleVelocityAtUv(uv);
+                valueText =
+                    `Speed ${value.magnitude.toFixed(3)} m/s | ` +
+                    `vx ${value.x.toFixed(3)} | vy ${value.y.toFixed(3)}`;
+            }
+
+            if (requestId !== this.hoverProbeRequestId || !this.hoverUv) {
+                return;
+            }
+
+            this.updateHoverReadoutValue(valueText);
+        } finally {
+            this.hoverProbeInFlight = false;
+        }
+    }
+
+    private updateHoverReadoutCoordinates(): void {
+        if (!this.hoverUv) {
+            return;
+        }
+
+        const xMeters = this.hoverUv.x * this.flow.getDomainWidthMeters();
+        const yMeters = this.hoverUv.y * this.flow.getDomainHeightMeters();
+
+        this.hoverReadoutCoords.textContent =
+            `x ${xMeters.toFixed(3)} m | y ${yMeters.toFixed(3)} m`;
+    }
+
+    private updateHoverReadoutValue(valueText: string): void {
+        this.hoverReadoutValue.textContent = valueText;
+        this.updateHoverReadoutVisibility();
+    }
+
+    private updateHoverReadoutVisibility(): void {
+        this.hoverReadout.classList.toggle(
+            'simulation-readout--hidden',
+            this.hoverUv === null
+        );
+    }
+
+    private invalidateHoverProbe(clearValue = false): void {
+        this.hoverProbeRequestId += 1;
+
+        if (clearValue) {
+            this.hoverProbeLastRequestTime = Number.NEGATIVE_INFINITY;
+        }
     }
 
     private isCameraAtDefault(): boolean {

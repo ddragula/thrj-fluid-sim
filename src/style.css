@@ -99,6 +99,48 @@ body {
         visibility 0s linear 180ms;
 }
 
+.simulation-readout {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    z-index: 8;
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid rgba(176, 205, 227, 0.14);
+    border-radius: 12px;
+    background: rgba(8, 12, 19, 0.52);
+    color: #eef7ff;
+    font-size: 11px;
+    line-height: 1.4;
+    letter-spacing: 0.01em;
+    pointer-events: none;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+    opacity: 1;
+    visibility: visible;
+    transition:
+        opacity 160ms ease,
+        visibility 0s linear 0s;
+}
+
+.simulation-readout--hidden {
+    opacity: 0;
+    visibility: hidden;
+    transition:
+        opacity 160ms ease,
+        visibility 0s linear 160ms;
+}
+
+.simulation-readout__coords {
+    color: #a8bfd8;
+}
+
+.simulation-readout__value {
+    color: #f4fbff;
+    font-weight: 600;
+}
+
 .simulation-panel:not([open]) {
     width: auto;
 }
@@ -326,6 +368,11 @@ body {
 
     .simulation-view-reset {
         right: 12px;
+        bottom: 12px;
+    }
+
+    .simulation-readout {
+        left: 12px;
         bottom: 12px;
     }
 }

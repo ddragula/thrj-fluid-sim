@@ -73,12 +73,14 @@ export class FlowEngine {
         const scalarUsage =
             GPUTextureUsage.TEXTURE_BINDING |
             GPUTextureUsage.STORAGE_BINDING |
-            GPUTextureUsage.COPY_DST;
+            GPUTextureUsage.COPY_DST |
+            GPUTextureUsage.COPY_SRC;
 
         const vectorUsage =
             GPUTextureUsage.TEXTURE_BINDING |
             GPUTextureUsage.STORAGE_BINDING |
-            GPUTextureUsage.COPY_DST;
+            GPUTextureUsage.COPY_DST |
+            GPUTextureUsage.COPY_SRC;
 
         this.dye = new PingPongTexture(
             device,
@@ -154,6 +156,36 @@ export class FlowEngine {
 
     getDomainAspectRatio(): number {
         return DOMAIN_WIDTH_METERS / DOMAIN_HEIGHT_METERS;
+    }
+
+    getDomainWidthMeters(): number {
+        return DOMAIN_WIDTH_METERS;
+    }
+
+    getDomainHeightMeters(): number {
+        return DOMAIN_HEIGHT_METERS;
+    }
+
+    async sampleDyeAtUv(uv: Point): Promise<number> {
+        const sample = await this.readPixel(this.dye.readTexture, uv);
+        return sample[0];
+    }
+
+    async sampleTemperatureAtUv(uv: Point): Promise<number> {
+        const sample = await this.readPixel(this.temperature.readTexture, uv);
+        return sample[0];
+    }
+
+    async sampleVelocityAtUv(uv: Point): Promise<{ x: number; y: number; magnitude: number }> {
+        const sample = await this.readPixel(this.velocity.readTexture, uv);
+        const x = sample[0];
+        const y = sample[1];
+
+        return {
+            x,
+            y,
+            magnitude: Math.hypot(x, y)
+        };
     }
 
     setDyeBrushStroke(fromUv: Point, toUv: Point): void {
@@ -469,6 +501,52 @@ export class FlowEngine {
             { bytesPerRow: this.width * bytesPerTexel, rowsPerImage: this.height },
             { width: this.width, height: this.height, depthOrArrayLayers: 1 }
         );
+    }
+
+    private async readPixel(texture: GPUTexture, uv: Point): Promise<Float32Array> {
+        const { x, y } = this.getTexelCoordinates(uv);
+        const bytesPerRow = 256;
+        const buffer = this.device.createBuffer({
+            size: bytesPerRow,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+        const encoder = this.device.createCommandEncoder();
+
+        encoder.copyTextureToBuffer(
+            {
+                texture,
+                origin: { x, y, z: 0 }
+            },
+            {
+                buffer,
+                bytesPerRow,
+                rowsPerImage: 1
+            },
+            {
+                width: 1,
+                height: 1,
+                depthOrArrayLayers: 1
+            }
+        );
+
+        this.device.queue.submit([encoder.finish()]);
+        await buffer.mapAsync(GPUMapMode.READ);
+
+        const mapped = buffer.getMappedRange();
+        const result = new Float32Array(4);
+        result.set(new Float32Array(mapped, 0, 4));
+
+        buffer.unmap();
+        buffer.destroy();
+
+        return result;
+    }
+
+    private getTexelCoordinates(uv: Point): { x: number; y: number } {
+        return {
+            x: clamp(Math.floor(uv.x * this.width), 0, this.width - 1),
+            y: clamp(Math.floor(uv.y * this.height), 0, this.height - 1)
+        };
     }
 }
 

@@ -60,6 +60,45 @@ body {
         visibility 0s linear 320ms;
 }
 
+.simulation-view-reset {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 8;
+    border: 1px solid rgba(176, 205, 227, 0.16);
+    border-radius: 999px;
+    background: rgba(8, 12, 19, 0.54);
+    color: rgba(237, 243, 251, 0.9);
+    padding: 8px 12px;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+    opacity: 1;
+    visibility: visible;
+    transition:
+        opacity 180ms ease,
+        visibility 0s linear 0s,
+        background 180ms ease,
+        border-color 180ms ease;
+}
+
+.simulation-view-reset:hover {
+    background: rgba(14, 22, 34, 0.72);
+    border-color: rgba(176, 205, 227, 0.28);
+}
+
+.simulation-view-reset--hidden {
+    opacity: 0;
+    visibility: hidden;
+    transition:
+        opacity 180ms ease,
+        visibility 0s linear 180ms;
+}
+
 .simulation-panel:not([open]) {
     width: auto;
 }
@@ -283,5 +322,10 @@ body {
 
     .simulation-panel__mode-group {
         grid-template-columns: 1fr;
+    }
+
+    .simulation-view-reset {
+        right: 12px;
+        bottom: 12px;
     }
 }

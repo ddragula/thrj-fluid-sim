@@ -150,6 +150,10 @@ export class FlowEngine {
         return this.velocity.readView;
     }
 
+    getDomainAspectRatio(): number {
+        return DOMAIN_WIDTH_METERS / DOMAIN_HEIGHT_METERS;
+    }
+
     setDyeBrushStroke(fromUv: Point, toUv: Point): void {
         this.dyeBrush.active = true;
         this.dyeBrush.fromUv = clampUv(fromUv);

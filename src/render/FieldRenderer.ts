@@ -9,7 +9,7 @@ export class FieldRenderer {
 
     constructor(private readonly gpu: GpuContext) {
         this.renderParamsBuffer = gpu.device.createBuffer({
-            size: 32,
+            size: 64,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
@@ -40,21 +40,31 @@ export class FieldRenderer {
         velocityView: GPUTextureView,
         mode: RenderMode,
         ambientTemperature: number,
-        heaterTemperature: number
+        heaterTemperature: number,
+        domainAspectRatio: number,
+        cameraCenterX: number,
+        cameraCenterY: number,
+        cameraZoom: number
     ): void {
-        const { device, context } = this.gpu;
+        const { canvas, device, context } = this.gpu;
         const temperatureDisplayRange = getTemperatureDisplayRange(
             ambientTemperature,
             heaterTemperature
         );
+        const viewportAspectRatio = canvas.width / canvas.height;
 
-        const renderParams = new ArrayBuffer(32);
+        const renderParams = new ArrayBuffer(64);
         const renderParamsView = new DataView(renderParams);
         renderParamsView.setUint32(0, mode, true);
         renderParamsView.setFloat32(16, ambientTemperature, true);
         renderParamsView.setFloat32(20, heaterTemperature, true);
         renderParamsView.setFloat32(24, temperatureDisplayRange.min, true);
         renderParamsView.setFloat32(28, temperatureDisplayRange.max, true);
+        renderParamsView.setFloat32(32, viewportAspectRatio, true);
+        renderParamsView.setFloat32(36, domainAspectRatio, true);
+        renderParamsView.setFloat32(40, cameraCenterX, true);
+        renderParamsView.setFloat32(44, cameraCenterY, true);
+        renderParamsView.setFloat32(48, cameraZoom, true);
 
         device.queue.writeBuffer(this.renderParamsBuffer, 0, renderParams);
 

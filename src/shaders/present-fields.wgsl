@@ -16,6 +16,13 @@ struct RenderParams {
     heaterTemperature: f32,
     displayMin: f32,
     displayMax: f32,
+    viewportAspectRatio: f32,
+    domainAspectRatio: f32,
+    cameraCenterX: f32,
+    cameraCenterY: f32,
+    cameraZoom: f32,
+    _pad4: f32,
+    _pad5: vec2f,
 }
 
 @group(0) @binding(3)
@@ -24,6 +31,11 @@ var<uniform> renderParams: RenderParams;
 struct VSOut {
     @builtin(position) position: vec4f,
     @location(0) uv: vec2f,
+}
+
+struct DomainSample {
+    inside: bool,
+    uv: vec2f,
 }
 
 @vertex
@@ -164,10 +176,39 @@ fn renderVelocity(p: vec2i) -> vec3f {
     return color + intensity * intensity * 0.24 * vec3f(0.85, 0.95, 1.0);
 }
 
+fn mapViewportUvToDomainUv(uv: vec2f) -> DomainSample {
+    let viewportAspectRatio = max(renderParams.viewportAspectRatio, 1e-5);
+    let domainAspectRatio = max(renderParams.domainAspectRatio, 1e-5);
+    let zoom = max(renderParams.cameraZoom, 1e-5);
+    let center = vec2f(renderParams.cameraCenterX, renderParams.cameraCenterY);
+    var visibleSize = vec2f(1.0, 1.0);
+
+    if (viewportAspectRatio > domainAspectRatio) {
+        visibleSize = vec2f(viewportAspectRatio / domainAspectRatio, 1.0);
+    } else {
+        visibleSize = vec2f(1.0, domainAspectRatio / viewportAspectRatio);
+    }
+
+    let scaledVisibleSize = visibleSize / zoom;
+    let domainUv = center + (uv - vec2f(0.5, 0.5)) * scaledVisibleSize;
+
+    return DomainSample(
+        all(domainUv >= vec2f(0.0)) && all(domainUv <= vec2f(1.0)),
+        clamp(domainUv, vec2f(0.0), vec2f(0.999999))
+    );
+}
+
 @fragment
 fn fs(in: VSOut) -> @location(0) vec4f {
+    let background = vec3f(0.02, 0.025, 0.035);
     let size = textureDimensions(dyeTex);
-    let uv = clamp(in.uv, vec2f(0.0), vec2f(0.999999));
+    let domainSample = mapViewportUvToDomainUv(in.uv);
+
+    if (!domainSample.inside) {
+        return vec4f(background, 1.0);
+    }
+
+    let uv = domainSample.uv;
     let p = vec2i(uv * vec2f(size));
 
     var color = vec3f(1.0, 0.0, 1.0);

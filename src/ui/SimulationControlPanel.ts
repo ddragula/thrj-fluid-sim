@@ -4,6 +4,10 @@ import {
     FlowSimulationParams
 } from '../sim/FlowSimulationParams';
 import { RenderMode } from '../render/RenderMode';
+import {
+    TEMPERATURE_SCALE_STOPS,
+    getTemperatureDisplayRange
+} from '../render/temperatureScale';
 
 type ParamControlDescriptor = {
     key: FlowSimulationParamKey;
@@ -88,6 +92,11 @@ export class SimulationControlPanel {
     private readonly controls = new Map<FlowSimulationParamKey, ParamControlElements>();
     private readonly modeButtons = new Map<RenderMode, HTMLButtonElement>();
     private readonly betaValue: HTMLSpanElement;
+    private readonly temperatureLegend: HTMLDivElement;
+    private temperatureLegendBar!: HTMLDivElement;
+    private temperatureLegendMin!: HTMLSpanElement;
+    private temperatureLegendMax!: HTMLSpanElement;
+    private temperatureLegendContext!: HTMLSpanElement;
     private renderMode: RenderMode;
 
     constructor(
@@ -112,6 +121,8 @@ export class SimulationControlPanel {
         this.root.appendChild(content);
 
         content.appendChild(this.createRenderModeSection());
+        this.temperatureLegend = this.createTemperatureLegendSection();
+        content.appendChild(this.temperatureLegend);
 
         const derived = document.createElement('div');
         derived.className = 'simulation-panel__derived';
@@ -141,6 +152,39 @@ export class SimulationControlPanel {
         document.body.appendChild(this.root);
 
         this.refresh();
+    }
+
+    private createTemperatureLegendSection(): HTMLDivElement {
+        const section = document.createElement('div');
+        section.className = 'simulation-panel__legend';
+
+        const title = document.createElement('div');
+        title.className = 'simulation-panel__legend-title';
+        title.textContent = 'Temperature Scale';
+        section.appendChild(title);
+
+        const bar = document.createElement('div');
+        bar.className = 'simulation-panel__legend-bar';
+        section.appendChild(bar);
+        this.temperatureLegendBar = bar;
+
+        const range = document.createElement('div');
+        range.className = 'simulation-panel__legend-range';
+
+        const min = document.createElement('span');
+        const max = document.createElement('span');
+        range.appendChild(min);
+        range.appendChild(max);
+        section.appendChild(range);
+        this.temperatureLegendMin = min;
+        this.temperatureLegendMax = max;
+
+        const context = document.createElement('div');
+        context.className = 'simulation-panel__legend-context';
+        section.appendChild(context);
+        this.temperatureLegendContext = context;
+
+        return section;
     }
 
     private createControl(descriptor: ParamControlDescriptor): HTMLElement {
@@ -236,6 +280,7 @@ export class SimulationControlPanel {
         }
 
         this.betaValue.textContent = `${this.params.thermalExpansionCoefficient.toExponential(3)} 1/K`;
+        this.refreshTemperatureLegend(snapshot);
         this.updateModeButtons();
     }
 
@@ -270,10 +315,29 @@ export class SimulationControlPanel {
     }
 
     private updateModeButtons(): void {
+        this.temperatureLegend.classList.toggle(
+            'simulation-panel__legend--hidden',
+            this.renderMode !== RenderMode.Temperature
+        );
+
         for (const [mode, button] of this.modeButtons) {
             button.classList.toggle('simulation-panel__mode-button--active', mode === this.renderMode);
             button.setAttribute('aria-pressed', mode === this.renderMode ? 'true' : 'false');
         }
+    }
+
+    private refreshTemperatureLegend(snapshot: FlowSimulationParamValues): void {
+        const range = getTemperatureLegendRange(
+            snapshot.ambientTemperature,
+            snapshot.heaterTemperature
+        );
+
+        this.temperatureLegendBar.style.background = createTemperatureLegendGradient();
+        this.temperatureLegendMin.textContent = `${formatLegendTemperature(range.min)} °C`;
+        this.temperatureLegendMax.textContent = `${formatLegendTemperature(range.max)} °C`;
+        this.temperatureLegendContext.textContent =
+            `Ambient ${formatLegendTemperature(snapshot.ambientTemperature)} °C | ` +
+            `Heater ${formatLegendTemperature(snapshot.heaterTemperature)} °C`;
     }
 }
 
@@ -299,4 +363,27 @@ function formatControlValue(key: FlowSimulationParamKey, value: number): string 
 
 function clampValue(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
+}
+
+function getTemperatureLegendRange(
+    ambientTemperature: number,
+    heaterTemperature: number
+): { min: number; max: number } {
+    return getTemperatureDisplayRange(ambientTemperature, heaterTemperature);
+}
+
+function createTemperatureLegendGradient(): string {
+    const colorStops = TEMPERATURE_SCALE_STOPS.map((stop) => {
+        return `${stop.color} ${(clamp01(stop.position) * 100).toFixed(2)}%`;
+    });
+
+    return `linear-gradient(90deg, ${colorStops.join(', ')})`;
+}
+
+function formatLegendTemperature(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function clamp01(value: number): number {
+    return Math.min(1, Math.max(0, value));
 }

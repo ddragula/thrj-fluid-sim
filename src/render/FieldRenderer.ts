@@ -1,5 +1,6 @@
 import { GpuContext } from '../gpu/GpuContext';
 import { RenderMode } from './RenderMode';
+import { getTemperatureDisplayRange } from './temperatureScale';
 import presentFieldsShader from '../shaders/present-fields.wgsl?raw';
 
 export class FieldRenderer {
@@ -42,12 +43,18 @@ export class FieldRenderer {
         heaterTemperature: number
     ): void {
         const { device, context } = this.gpu;
+        const temperatureDisplayRange = getTemperatureDisplayRange(
+            ambientTemperature,
+            heaterTemperature
+        );
 
         const renderParams = new ArrayBuffer(32);
         const renderParamsView = new DataView(renderParams);
         renderParamsView.setUint32(0, mode, true);
         renderParamsView.setFloat32(16, ambientTemperature, true);
         renderParamsView.setFloat32(20, heaterTemperature, true);
+        renderParamsView.setFloat32(24, temperatureDisplayRange.min, true);
+        renderParamsView.setFloat32(28, temperatureDisplayRange.max, true);
 
         device.queue.writeBuffer(this.renderParamsBuffer, 0, renderParams);
 

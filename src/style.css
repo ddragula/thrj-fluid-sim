@@ -95,6 +95,46 @@ body {
     color: #dce9f6;
 }
 
+.simulation-panel__legend {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(113, 147, 173, 0.08);
+    border: 1px solid rgba(176, 205, 227, 0.12);
+}
+
+.simulation-panel__legend--hidden {
+    display: none;
+}
+
+.simulation-panel__legend-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #dce9f6;
+    letter-spacing: 0.01em;
+}
+
+.simulation-panel__legend-bar {
+    height: 12px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.simulation-panel__legend-range {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 11px;
+    color: #c4d4e6;
+}
+
+.simulation-panel__legend-context {
+    font-size: 11px;
+    color: #90a5bb;
+    line-height: 1.4;
+}
+
 .simulation-panel__row {
     display: grid;
     gap: 8px;

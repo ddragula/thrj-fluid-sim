@@ -14,7 +14,8 @@ struct RenderParams {
     _pad2: u32,
     ambientTemperature: f32,
     heaterTemperature: f32,
-    _pad3: vec2f,
+    displayMin: f32,
+    displayMax: f32,
 }
 
 @group(0) @binding(3)
@@ -55,28 +56,65 @@ fn renderDye(p: vec2i) -> vec3f {
         + glow * vec3f(0.10, 0.32, 0.75);
 }
 
+fn temperaturePalette(position: f32) -> vec3f {
+    // Keep these stops in sync with the temperature legend in the control panel.
+    let clampedPosition = clamp(position, 0.0, 1.0);
+
+    let coolBlue = vec3f(0.121, 0.071, 0.776);
+    let deepBlue = vec3f(0.161, 0.188, 0.812);
+    let violet = vec3f(0.478, 0.200, 0.788);
+    let magenta = vec3f(0.788, 0.169, 0.588);
+    let red = vec3f(0.937, 0.231, 0.310);
+    let orange = vec3f(1.0, 0.396, 0.094);
+    let amber = vec3f(1.0, 0.671, 0.114);
+    let yellow = vec3f(1.0, 0.898, 0.427);
+    let nearWhite = vec3f(1.0, 0.984, 0.824);
+
+    if (clampedPosition <= 0.16) {
+        return mix(coolBlue, deepBlue, smoothstep(0.0, 0.16, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.32) {
+        return mix(deepBlue, violet, smoothstep(0.16, 0.32, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.46) {
+        return mix(violet, magenta, smoothstep(0.32, 0.46, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.58) {
+        return mix(magenta, red, smoothstep(0.46, 0.58, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.68) {
+        return mix(red, orange, smoothstep(0.58, 0.68, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.80) {
+        return mix(orange, amber, smoothstep(0.68, 0.80, clampedPosition));
+    }
+
+    if (clampedPosition <= 0.90) {
+        return mix(amber, yellow, smoothstep(0.80, 0.90, clampedPosition));
+    }
+
+    return mix(yellow, nearWhite, smoothstep(0.90, 1.0, clampedPosition));
+}
+
 fn renderTemperature(p: vec2i) -> vec3f {
     let temperature = textureLoad(temperatureTex, p, 0).x;
-    let temperatureRange = max(
-        renderParams.heaterTemperature - renderParams.ambientTemperature,
+    let displaySpan = max(
+        renderParams.displayMax - renderParams.displayMin,
         1e-5
     );
     let normalizedTemperature = clamp(
-        (temperature - renderParams.ambientTemperature) / temperatureRange,
+        (temperature - renderParams.displayMin) / displaySpan,
         0.0,
         1.0
     );
-    let background = vec3f(0.01, 0.014, 0.024);
-    let cold = vec3f(0.06, 0.18, 0.40);
-    let warm = vec3f(0.95, 0.38, 0.08);
-    let hot = vec3f(1.0, 0.96, 0.72);
+    let bandedTemperature = floor(normalizedTemperature * 20.0 + 0.5) / 20.0;
 
-    var color = mix(cold, warm, smoothstep(0.0, 0.65, normalizedTemperature));
-    color = mix(color, hot, smoothstep(0.45, 1.0, normalizedTemperature));
-    color = mix(background, color, smoothstep(0.02, 0.95, normalizedTemperature));
-
-    let glow = smoothstep(0.35, 1.0, normalizedTemperature);
-    return color + glow * glow * vec3f(0.28, 0.12, 0.02);
+    return temperaturePalette(bandedTemperature);
 }
 
 fn renderVelocity(p: vec2i) -> vec3f {

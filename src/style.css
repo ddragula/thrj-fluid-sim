@@ -250,6 +250,12 @@ body {
     gap: 8px;
 }
 
+.simulation-panel__help {
+    font-size: 11px;
+    line-height: 1.4;
+    color: #8ea6bf;
+}
+
 .simulation-panel__mode-group {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -319,6 +325,8 @@ body {
 .simulation-panel__actions {
     display: flex;
     justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
     margin-top: 4px;
 }
 
@@ -336,6 +344,15 @@ body {
 
 .simulation-panel__button:hover {
     background: rgba(89, 150, 184, 0.28);
+}
+
+.simulation-panel__button--secondary {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(176, 205, 227, 0.18);
+}
+
+.simulation-panel__button--secondary:hover {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 @media (max-width: 720px) {

@@ -38,10 +38,13 @@ export class FieldRenderer {
         dyeView: GPUTextureView,
         temperatureView: GPUTextureView,
         velocityView: GPUTextureView,
+        domainElementsBuffer: GPUBuffer,
         mode: RenderMode,
         ambientTemperature: number,
         heaterTemperature: number,
         domainAspectRatio: number,
+        domainWidthMeters: number,
+        domainHeightMeters: number,
         cameraCenterX: number,
         cameraCenterY: number,
         cameraZoom: number
@@ -65,6 +68,8 @@ export class FieldRenderer {
         renderParamsView.setFloat32(40, cameraCenterX, true);
         renderParamsView.setFloat32(44, cameraCenterY, true);
         renderParamsView.setFloat32(48, cameraZoom, true);
+        renderParamsView.setFloat32(52, domainWidthMeters, true);
+        renderParamsView.setFloat32(56, domainHeightMeters, true);
 
         device.queue.writeBuffer(this.renderParamsBuffer, 0, renderParams);
 
@@ -74,7 +79,8 @@ export class FieldRenderer {
                 { binding: 0, resource: dyeView },
                 { binding: 1, resource: temperatureView },
                 { binding: 2, resource: velocityView },
-                { binding: 3, resource: { buffer: this.renderParamsBuffer } }
+                { binding: 3, resource: { buffer: domainElementsBuffer } },
+                { binding: 4, resource: { buffer: this.renderParamsBuffer } }
             ]
         });
 

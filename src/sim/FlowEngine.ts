@@ -1,3 +1,7 @@
+import {
+    type DomainElement,
+    MAX_DOMAIN_ELEMENTS
+} from './DomainElement';
 import { PingPongTexture } from './PingPongTexture';
 import { FlowSimulationParams } from './FlowSimulationParams';
 import advectDyeShader from '../shaders/advect-dye.wgsl?raw';
@@ -14,12 +18,19 @@ const HEATER_DIAMETER_METERS = 0.015;
 const HEATER_RADIUS_METERS = HEATER_DIAMETER_METERS * 0.5;
 const HEATER_CENTER_X_METERS = DOMAIN_WIDTH_METERS * 0.5;
 const HEATER_CENTER_Y_METERS = DOMAIN_HEIGHT_METERS * 0.86;
+const AMBIENT_WALL_THICKNESS_METERS = 0.008;
+const MIN_AMBIENT_WALL_LENGTH_METERS = 0.002;
 const MAX_SUBSTEPS_PER_FRAME = 24;
 const SUBSTEP_SAFETY_FACTOR = 0.05;
 const BUOYANCY_DISPLACEMENT_FRACTION = 0.35;
 const MIN_PRESSURE_ITERATIONS_PER_SUBSTEP = 6;
 const DYE_BRUSH_RADIUS_METERS = 0.006;
 const DYE_BRUSH_STRENGTH = 3.0;
+const DOMAIN_ELEMENT_STRIDE_BYTES = 48;
+const DOMAIN_ELEMENT_TYPE_NONE = 0;
+const DOMAIN_ELEMENT_TYPE_AMBIENT_WALL = 1;
+const DOMAIN_ELEMENT_TYPE_HOT_CIRCLE = 2;
+const DOMAIN_ELEMENT_DYNAMIC_TEMPERATURE_SENTINEL = -1e30;
 
 type Point = {
     x: number;
@@ -46,6 +57,8 @@ export class FlowEngine {
     private readonly divergenceView: GPUTextureView;
 
     private readonly paramsBuffer: GPUBuffer;
+    private readonly domainElementsBuffer: GPUBuffer;
+    private domainElements: DomainElement[];
 
     private readonly advectVelocityPipeline: GPUComputePipeline;
     private readonly buoyancyPipeline: GPUComputePipeline;
@@ -69,6 +82,7 @@ export class FlowEngine {
         this.width = width;
         this.height = height;
         this.simulationParams = new FlowSimulationParams();
+        this.domainElements = createDefaultDomainElements();
 
         const scalarUsage =
             GPUTextureUsage.TEXTURE_BINDING |
@@ -127,6 +141,11 @@ export class FlowEngine {
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
+        this.domainElementsBuffer = device.createBuffer({
+            size: MAX_DOMAIN_ELEMENTS * DOMAIN_ELEMENT_STRIDE_BYTES,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        });
+
         this.advectVelocityPipeline = this.createComputePipeline(advectVelocityShader);
         this.buoyancyPipeline = this.createComputePipeline(applyBuoyancyShader);
         this.divergencePipeline = this.createComputePipeline(computeDivergenceShader);
@@ -135,11 +154,8 @@ export class FlowEngine {
         this.temperaturePipeline = this.createComputePipeline(advectTemperatureShader);
         this.dyePipeline = this.createComputePipeline(advectDyeShader);
 
-        this.clearField(this.dye, 16);
-        this.clearField(this.velocity, 16);
-        this.clearField(this.pressure, 16);
-        this.clearTexture(this.divergenceTexture, 16);
-        this.initializeTemperatureField();
+        this.writeDomainElements(this.simulationParams);
+        this.resetSimulationFields();
     }
 
     getDyeView(): GPUTextureView {
@@ -152,6 +168,14 @@ export class FlowEngine {
 
     getVelocityView(): GPUTextureView {
         return this.velocity.readView;
+    }
+
+    getDomainElementsBuffer(): GPUBuffer {
+        return this.domainElementsBuffer;
+    }
+
+    getDomainElements(): readonly DomainElement[] {
+        return this.domainElements;
     }
 
     getDomainAspectRatio(): number {
@@ -188,6 +212,44 @@ export class FlowEngine {
         };
     }
 
+    setDomainElements(elements: DomainElement[]): void {
+        this.domainElements = normalizeDomainElements(elements);
+        this.writeDomainElements(this.simulationParams);
+        this.resetSimulationFields();
+    }
+
+    resetDomainElements(): void {
+        this.setDomainElements(createDefaultDomainElements());
+    }
+
+    clearDomainElements(): void {
+        this.setDomainElements([]);
+    }
+
+    addHotCircleAtUv(uv: Point): boolean {
+        return this.addDomainElement({
+            kind: 'hotCircle',
+            center: uvToDomainPoint(clampUv(uv)),
+            radius: HEATER_RADIUS_METERS
+        });
+    }
+
+    addAmbientWallAtUv(fromUv: Point, toUv: Point): boolean {
+        const start = uvToDomainPoint(clampUv(fromUv));
+        const end = uvToDomainPoint(clampUv(toUv));
+
+        if (distanceBetweenPoints(start, end) < MIN_AMBIENT_WALL_LENGTH_METERS) {
+            return false;
+        }
+
+        return this.addDomainElement({
+            kind: 'ambientWall',
+            start,
+            end,
+            thickness: AMBIENT_WALL_THICKNESS_METERS
+        });
+    }
+
     setDyeBrushStroke(fromUv: Point, toUv: Point): void {
         this.dyeBrush.active = true;
         this.dyeBrush.fromUv = clampUv(fromUv);
@@ -207,6 +269,8 @@ export class FlowEngine {
             substepCount
         );
 
+        this.writeDomainElements(settings);
+
         for (let substepIndex = 0; substepIndex < substepCount; substepIndex += 1) {
             const substepTime =
                 timeSeconds - dtSeconds + substepDt * (substepIndex + 1);
@@ -223,7 +287,8 @@ export class FlowEngine {
                 [
                     { binding: 0, resource: this.velocity.readView },
                     { binding: 1, resource: this.velocity.writeView },
-                    { binding: 2, resource: { buffer: this.paramsBuffer } }
+                    { binding: 2, resource: { buffer: this.domainElementsBuffer } },
+                    { binding: 3, resource: { buffer: this.paramsBuffer } }
                 ],
                 workgroupsX,
                 workgroupsY
@@ -237,7 +302,8 @@ export class FlowEngine {
                     { binding: 0, resource: this.temperature.readView },
                     { binding: 1, resource: this.velocity.readView },
                     { binding: 2, resource: this.velocity.writeView },
-                    { binding: 3, resource: { buffer: this.paramsBuffer } }
+                    { binding: 3, resource: { buffer: this.domainElementsBuffer } },
+                    { binding: 4, resource: { buffer: this.paramsBuffer } }
                 ],
                 workgroupsX,
                 workgroupsY
@@ -250,7 +316,8 @@ export class FlowEngine {
                 [
                     { binding: 0, resource: this.velocity.readView },
                     { binding: 1, resource: this.divergenceView },
-                    { binding: 2, resource: { buffer: this.paramsBuffer } }
+                    { binding: 2, resource: { buffer: this.domainElementsBuffer } },
+                    { binding: 3, resource: { buffer: this.paramsBuffer } }
                 ],
                 workgroupsX,
                 workgroupsY
@@ -264,7 +331,8 @@ export class FlowEngine {
                         { binding: 0, resource: this.pressure.readView },
                         { binding: 1, resource: this.divergenceView },
                         { binding: 2, resource: this.pressure.writeView },
-                        { binding: 3, resource: { buffer: this.paramsBuffer } }
+                        { binding: 3, resource: { buffer: this.domainElementsBuffer } },
+                        { binding: 4, resource: { buffer: this.paramsBuffer } }
                     ],
                     workgroupsX,
                     workgroupsY
@@ -279,7 +347,8 @@ export class FlowEngine {
                     { binding: 0, resource: this.velocity.readView },
                     { binding: 1, resource: this.pressure.readView },
                     { binding: 2, resource: this.velocity.writeView },
-                    { binding: 3, resource: { buffer: this.paramsBuffer } }
+                    { binding: 3, resource: { buffer: this.domainElementsBuffer } },
+                    { binding: 4, resource: { buffer: this.paramsBuffer } }
                 ],
                 workgroupsX,
                 workgroupsY
@@ -293,7 +362,8 @@ export class FlowEngine {
                     { binding: 0, resource: this.temperature.readView },
                     { binding: 1, resource: this.velocity.readView },
                     { binding: 2, resource: this.temperature.writeView },
-                    { binding: 3, resource: { buffer: this.paramsBuffer } }
+                    { binding: 3, resource: { buffer: this.domainElementsBuffer } },
+                    { binding: 4, resource: { buffer: this.paramsBuffer } }
                 ],
                 workgroupsX,
                 workgroupsY
@@ -307,7 +377,8 @@ export class FlowEngine {
                     { binding: 0, resource: this.dye.readView },
                     { binding: 1, resource: this.velocity.readView },
                     { binding: 2, resource: this.dye.writeView },
-                    { binding: 3, resource: { buffer: this.paramsBuffer } }
+                    { binding: 3, resource: { buffer: this.domainElementsBuffer } },
+                    { binding: 4, resource: { buffer: this.paramsBuffer } }
                 ],
                 workgroupsX,
                 workgroupsY
@@ -318,6 +389,19 @@ export class FlowEngine {
         }
     }
 
+    private addDomainElement(element: DomainElement): boolean {
+        if (this.domainElements.length >= MAX_DOMAIN_ELEMENTS) {
+            return false;
+        }
+
+        this.setDomainElements([
+            ...this.domainElements,
+            element
+        ]);
+
+        return true;
+    }
+
     private createComputePipeline(code: string): GPUComputePipeline {
         return this.device.createComputePipeline({
             layout: 'auto',
@@ -326,6 +410,48 @@ export class FlowEngine {
                 entryPoint: 'main'
             }
         });
+    }
+
+    private writeDomainElements(settings: FlowSimulationParams): void {
+        const buffer = new ArrayBuffer(MAX_DOMAIN_ELEMENTS * DOMAIN_ELEMENT_STRIDE_BYTES);
+        const view = new DataView(buffer);
+
+        for (let index = 0; index < MAX_DOMAIN_ELEMENTS; index += 1) {
+            const element = this.domainElements[index];
+            const baseOffset = index * DOMAIN_ELEMENT_STRIDE_BYTES;
+
+            if (!element) {
+                view.setUint32(baseOffset, DOMAIN_ELEMENT_TYPE_NONE, true);
+                continue;
+            }
+
+            if (element.kind === 'ambientWall') {
+                view.setUint32(baseOffset, DOMAIN_ELEMENT_TYPE_AMBIENT_WALL, true);
+                view.setFloat32(baseOffset + 16, element.start.x, true);
+                view.setFloat32(baseOffset + 20, element.start.y, true);
+                view.setFloat32(baseOffset + 24, element.end.x, true);
+                view.setFloat32(baseOffset + 28, element.end.y, true);
+                view.setFloat32(baseOffset + 32, element.thickness, true);
+                continue;
+            }
+
+            view.setUint32(baseOffset, DOMAIN_ELEMENT_TYPE_HOT_CIRCLE, true);
+            view.setFloat32(baseOffset + 16, element.center.x, true);
+            view.setFloat32(baseOffset + 20, element.center.y, true);
+            view.setFloat32(baseOffset + 24, element.radius, true);
+            const explicitTemperature = element.temperature;
+            const serializedTemperature =
+                typeof explicitTemperature === 'number' && Number.isFinite(explicitTemperature)
+                    ? explicitTemperature
+                    : DOMAIN_ELEMENT_DYNAMIC_TEMPERATURE_SENTINEL;
+            view.setFloat32(
+                baseOffset + 28,
+                serializedTemperature,
+                true
+            );
+        }
+
+        this.device.queue.writeBuffer(this.domainElementsBuffer, 0, buffer);
     }
 
     private writeSimulationParams(
@@ -353,9 +479,9 @@ export class FlowEngine {
                 settings.thermalDiffusivity,
                 settings.dyeDecayRate,
                 settings.heaterTemperature,
-                HEATER_CENTER_X_METERS,
-                HEATER_CENTER_Y_METERS,
-                HEATER_RADIUS_METERS,
+                0.0,
+                0.0,
+                0.0,
                 brushFrom.x,
                 brushFrom.y,
                 brushTo.x,
@@ -387,6 +513,14 @@ export class FlowEngine {
         pass.end();
     }
 
+    private resetSimulationFields(): void {
+        this.clearField(this.dye, 16);
+        this.clearField(this.velocity, 16);
+        this.clearField(this.pressure, 16);
+        this.clearTexture(this.divergenceTexture, 16);
+        this.initializeTemperatureField();
+    }
+
     private clearField(field: PingPongTexture, bytesPerTexel: number): void {
         this.clearTexture(field.readTexture, bytesPerTexel);
         this.clearTexture(field.writeTexture, bytesPerTexel);
@@ -414,10 +548,11 @@ export class FlowEngine {
                 ? SUBSTEP_SAFETY_FACTOR /
                     (maxDiffusion * inverseGridScale)
                 : Number.POSITIVE_INFINITY;
+        const maxHotTemperature = this.getMaxHotTemperature(settings);
         const buoyancyAcceleration =
             settings.gravity *
             settings.thermalExpansionCoefficient *
-            Math.max(settings.heaterTemperature - settings.ambientTemperature, 0.0);
+            Math.max(maxHotTemperature - settings.ambientTemperature, 0.0);
         const stableDtFromBuoyancy =
             buoyancyAcceleration > 0.0
                 ? Math.sqrt(
@@ -459,6 +594,28 @@ export class FlowEngine {
         );
     }
 
+    private getMaxHotTemperature(settings: FlowSimulationParams): number {
+        let maxTemperature = settings.ambientTemperature;
+
+        for (const element of this.domainElements) {
+            if (element.kind !== 'hotCircle') {
+                continue;
+            }
+
+            const explicitTemperature = element.temperature;
+            const resolvedTemperature =
+                typeof explicitTemperature === 'number' && Number.isFinite(explicitTemperature)
+                    ? explicitTemperature
+                    : settings.heaterTemperature;
+            maxTemperature = Math.max(
+                maxTemperature,
+                resolvedTemperature
+            );
+        }
+
+        return maxTemperature;
+    }
+
     private initializeTemperatureTexture(texture: GPUTexture): void {
         const dx = DOMAIN_WIDTH_METERS / this.width;
         const dy = DOMAIN_HEIGHT_METERS / this.height;
@@ -467,15 +624,13 @@ export class FlowEngine {
         for (let y = 0; y < this.height; y += 1) {
             for (let x = 0; x < this.width; x += 1) {
                 const index = (y * this.width + x) * 4;
-                const px = (x + 0.5) * dx;
-                const py = (y + 0.5) * dy;
-                const isHeater =
-                    (px - HEATER_CENTER_X_METERS) * (px - HEATER_CENTER_X_METERS) +
-                        (py - HEATER_CENTER_Y_METERS) * (py - HEATER_CENTER_Y_METERS) <=
-                    HEATER_RADIUS_METERS * HEATER_RADIUS_METERS;
-                const temperature = isHeater
-                    ? this.simulationParams.heaterTemperature
-                    : this.simulationParams.ambientTemperature;
+                const position = {
+                    x: (x + 0.5) * dx,
+                    y: (y + 0.5) * dy
+                };
+                const temperature =
+                    this.getSolidTemperatureAtPosition(position, this.simulationParams) ??
+                    this.simulationParams.ambientTemperature;
 
                 data[index] = temperature;
                 data[index + 1] = temperature;
@@ -490,6 +645,36 @@ export class FlowEngine {
             { bytesPerRow: this.width * 16, rowsPerImage: this.height },
             { width: this.width, height: this.height, depthOrArrayLayers: 1 }
         );
+    }
+
+    private getSolidTemperatureAtPosition(
+        position: Point,
+        settings: FlowSimulationParams
+    ): number | null {
+        for (const element of this.domainElements) {
+            if (element.kind === 'ambientWall') {
+                if (
+                    distanceToSegment(position, element.start, element.end) <=
+                    element.thickness * 0.5
+                ) {
+                    return settings.ambientTemperature;
+                }
+
+                continue;
+            }
+
+            const dx = position.x - element.center.x;
+            const dy = position.y - element.center.y;
+
+            if (dx * dx + dy * dy <= element.radius * element.radius) {
+                const explicitTemperature = element.temperature;
+                return Number.isFinite(explicitTemperature)
+                    ? explicitTemperature ?? settings.heaterTemperature
+                    : settings.heaterTemperature;
+            }
+        }
+
+        return null;
     }
 
     private clearTexture(texture: GPUTexture, bytesPerTexel: number): void {
@@ -550,10 +735,73 @@ export class FlowEngine {
     }
 }
 
+function createDefaultDomainElements(): DomainElement[] {
+    return [
+        {
+            kind: 'hotCircle',
+            center: {
+                x: HEATER_CENTER_X_METERS,
+                y: HEATER_CENTER_Y_METERS
+            },
+            radius: HEATER_RADIUS_METERS
+        }
+    ];
+}
+
+function normalizeDomainElements(elements: DomainElement[]): DomainElement[] {
+    const normalized: DomainElement[] = [];
+
+    for (const element of elements) {
+        if (normalized.length >= MAX_DOMAIN_ELEMENTS) {
+            break;
+        }
+
+        if (element.kind === 'ambientWall') {
+            const start = clampDomainPoint(element.start);
+            const end = clampDomainPoint(element.end);
+            const thickness = clamp(element.thickness, 1e-4, Math.max(DOMAIN_WIDTH_METERS, DOMAIN_HEIGHT_METERS));
+
+            if (distanceBetweenPoints(start, end) < 1e-5) {
+                continue;
+            }
+
+            normalized.push({
+                kind: 'ambientWall',
+                start,
+                end,
+                thickness
+            });
+            continue;
+        }
+
+        const center = clampDomainPoint(element.center);
+        const radius = clamp(element.radius, 1e-4, Math.max(DOMAIN_WIDTH_METERS, DOMAIN_HEIGHT_METERS));
+        const temperature = Number.isFinite(element.temperature)
+            ? element.temperature
+            : undefined;
+
+        normalized.push({
+            kind: 'hotCircle',
+            center,
+            radius,
+            temperature
+        });
+    }
+
+    return normalized;
+}
+
 function clampUv(point: Point): Point {
     return {
         x: clamp(point.x, 0.0, 1.0),
         y: clamp(point.y, 0.0, 1.0)
+    };
+}
+
+function clampDomainPoint(point: Point): Point {
+    return {
+        x: clamp(point.x, 0.0, DOMAIN_WIDTH_METERS),
+        y: clamp(point.y, 0.0, DOMAIN_HEIGHT_METERS)
     };
 }
 
@@ -562,6 +810,25 @@ function uvToDomainPoint(point: Point): Point {
         x: point.x * DOMAIN_WIDTH_METERS,
         y: point.y * DOMAIN_HEIGHT_METERS
     };
+}
+
+function distanceToSegment(point: Point, start: Point, end: Point): number {
+    const abx = end.x - start.x;
+    const aby = end.y - start.y;
+    const lengthSquared = Math.max(abx * abx + aby * aby, 1e-12);
+    const t = clamp(
+        ((point.x - start.x) * abx + (point.y - start.y) * aby) / lengthSquared,
+        0.0,
+        1.0
+    );
+    const closestX = start.x + abx * t;
+    const closestY = start.y + aby * t;
+
+    return Math.hypot(point.x - closestX, point.y - closestY);
+}
+
+function distanceBetweenPoints(a: Point, b: Point): number {
+    return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function clamp(value: number, min: number, max: number): number {

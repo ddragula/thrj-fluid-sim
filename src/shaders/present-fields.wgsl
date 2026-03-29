@@ -7,6 +7,21 @@ var temperatureTex: texture_2d<f32>;
 @group(0) @binding(2)
 var velocityTex: texture_2d<f32>;
 
+const DOMAIN_ELEMENT_TYPE_NONE: u32 = 0u;
+const DOMAIN_ELEMENT_TYPE_AMBIENT_WALL: u32 = 1u;
+const DOMAIN_ELEMENT_TYPE_HOT_CIRCLE: u32 = 2u;
+const MAX_DOMAIN_ELEMENTS: u32 = 16u;
+const DOMAIN_ELEMENT_DYNAMIC_TEMPERATURE_THRESHOLD: f32 = -1e29;
+
+struct DomainElement {
+    kind: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    data0: vec4f,
+    data1: vec4f,
+}
+
 struct RenderParams {
     mode: u32,
     _pad0: u32,
@@ -21,12 +36,10 @@ struct RenderParams {
     cameraCenterX: f32,
     cameraCenterY: f32,
     cameraZoom: f32,
+    domainWidthMeters: f32,
+    domainHeightMeters: f32,
     _pad4: f32,
-    _pad5: vec2f,
 }
-
-@group(0) @binding(3)
-var<uniform> renderParams: RenderParams;
 
 struct VSOut {
     @builtin(position) position: vec4f,
@@ -37,6 +50,17 @@ struct DomainSample {
     inside: bool,
     uv: vec2f,
 }
+
+struct SolidSample {
+    isSolid: bool,
+    temperature: f32,
+}
+
+@group(0) @binding(3)
+var<storage, read> domainElements: array<DomainElement, MAX_DOMAIN_ELEMENTS>;
+
+@group(0) @binding(4)
+var<uniform> renderParams: RenderParams;
 
 @vertex
 fn vs(@builtin(vertex_index) index: u32) -> VSOut {
@@ -70,7 +94,6 @@ fn renderDye(p: vec2i) -> vec3f {
 }
 
 fn temperaturePalette(position: f32) -> vec3f {
-    // Keep these stops in sync with the temperature legend in the control panel.
     let clampedPosition = clamp(position, 0.0, 1.0);
 
     let coolBlue = vec3f(0.121, 0.071, 0.776);
@@ -114,8 +137,7 @@ fn temperaturePalette(position: f32) -> vec3f {
     return mix(yellow, nearWhite, smoothstep(0.90, 1.0, clampedPosition));
 }
 
-fn renderTemperature(p: vec2i) -> vec3f {
-    let temperature = textureLoad(temperatureTex, p, 0).x;
+fn renderTemperatureValue(temperature: f32) -> vec3f {
     let displaySpan = max(
         renderParams.displayMax - renderParams.displayMin,
         1e-5
@@ -128,6 +150,10 @@ fn renderTemperature(p: vec2i) -> vec3f {
     let bandedTemperature = floor(normalizedTemperature * 20.0 + 0.5) / 20.0;
 
     return temperaturePalette(bandedTemperature);
+}
+
+fn renderTemperature(p: vec2i) -> vec3f {
+    return renderTemperatureValue(textureLoad(temperatureTex, p, 0).x);
 }
 
 fn renderVelocity(p: vec2i) -> vec3f {
@@ -149,6 +175,61 @@ fn renderVelocity(p: vec2i) -> vec3f {
     let color = mix(background, directionColor * (0.35 + 0.9 * intensity), intensity);
 
     return color + intensity * intensity * 0.24 * vec3f(0.85, 0.95, 1.0);
+}
+
+fn distanceToSegment(point: vec2f, start: vec2f, end: vec2f) -> f32 {
+    let delta = end - start;
+    let lengthSquared = max(dot(delta, delta), 1e-12);
+    let t = clamp(dot(point - start, delta) / lengthSquared, 0.0, 1.0);
+    let closest = start + t * delta;
+
+    return distance(point, closest);
+}
+
+fn getSolidSample(position: vec2f) -> SolidSample {
+    for (var index = 0u; index < MAX_DOMAIN_ELEMENTS; index = index + 1u) {
+        let element = domainElements[index];
+
+        if (element.kind == DOMAIN_ELEMENT_TYPE_NONE) {
+            continue;
+        }
+
+        if (element.kind == DOMAIN_ELEMENT_TYPE_AMBIENT_WALL) {
+            if (distanceToSegment(position, element.data0.xy, element.data0.zw) <= 0.5 * element.data1.x) {
+                return SolidSample(true, renderParams.ambientTemperature);
+            }
+
+            continue;
+        }
+
+        if (element.kind == DOMAIN_ELEMENT_TYPE_HOT_CIRCLE) {
+            let offset = position - element.data0.xy;
+
+            if (dot(offset, offset) <= element.data0.z * element.data0.z) {
+                let hotTemperature = select(
+                    element.data0.w,
+                    renderParams.heaterTemperature,
+                    element.data0.w <= DOMAIN_ELEMENT_DYNAMIC_TEMPERATURE_THRESHOLD
+                );
+
+                return SolidSample(true, hotTemperature);
+            }
+        }
+    }
+
+    return SolidSample(false, renderParams.ambientTemperature);
+}
+
+fn renderSolid(temperature: f32) -> vec3f {
+    if (temperature > renderParams.ambientTemperature + 0.5) {
+        if (renderParams.mode == 1u) {
+            return renderTemperatureValue(temperature);
+        }
+
+        return vec3f(0.94, 0.90, 0.78);
+    }
+
+    return vec3f(0.12, 0.15, 0.18);
 }
 
 fn mapViewportUvToDomainUv(uv: vec2f) -> DomainSample {
@@ -184,6 +265,13 @@ fn fs(in: VSOut) -> @location(0) vec4f {
     }
 
     let uv = domainSample.uv;
+    let positionMeters = uv * vec2f(renderParams.domainWidthMeters, renderParams.domainHeightMeters);
+    let solid = getSolidSample(positionMeters);
+
+    if (solid.isSolid) {
+        return vec4f(renderSolid(solid.temperature), 1.0);
+    }
+
     let p = vec2i(uv * vec2f(size));
 
     var color = vec3f(1.0, 0.0, 1.0);

@@ -1,6 +1,7 @@
 import { GpuContext } from '../gpu/GpuContext';
 import { FieldRenderer } from '../render/FieldRenderer';
 import { RenderMode } from '../render/RenderMode';
+import { type DomainEditMode } from '../sim/DomainElement';
 import { FlowEngine } from '../sim/FlowEngine';
 import { FlowSimulationParams } from '../sim/FlowSimulationParams';
 import { SimulationControlPanel } from '../ui/SimulationControlPanel';
@@ -10,7 +11,7 @@ type Point = {
     y: number;
 };
 
-type PointerInteractionMode = 'dye' | 'pan';
+type PointerInteractionMode = 'dye' | 'pan' | 'ambientWall';
 
 const MIN_CAMERA_ZOOM = 1e-4;
 const ZOOM_SENSITIVITY = 0.0015;
@@ -33,10 +34,13 @@ export class App {
 
     private lastTimeSeconds: number | null = null;
     private renderMode = RenderMode.Temperature;
+    private domainEditMode: DomainEditMode = 'navigate';
     private activePointerId: number | null = null;
     private pointerMode: PointerInteractionMode | null = null;
     private pointerCurrentUv: Point | null = null;
     private pointerPreviousUv: Point | null = null;
+    private wallDraftStartUv: Point | null = null;
+    private wallDraftCurrentUv: Point | null = null;
     private panPreviousCanvasUv: Point | null = null;
     private hoverUv: Point | null = null;
     private ctrlPressed = false;
@@ -61,6 +65,19 @@ export class App {
             this.renderMode,
             (mode) => {
                 this.renderMode = mode;
+                this.invalidateHoverProbe(true);
+            },
+            this.domainEditMode,
+            (mode) => {
+                this.domainEditMode = mode;
+                this.updateCanvasCursor();
+            },
+            () => {
+                this.flow.clearDomainElements();
+                this.invalidateHoverProbe(true);
+            },
+            () => {
+                this.flow.resetDomainElements();
                 this.invalidateHoverProbe(true);
             }
         );
@@ -128,26 +145,60 @@ export class App {
             this.controls.dismissDyeHint();
         }
 
-        this.activePointerId = event.pointerId;
-        this.pointerMode = event.button === 1 || event.ctrlKey || event.shiftKey ? 'pan' : 'dye';
-
-        if (this.pointerMode === 'pan') {
+        if (event.button === 1 || event.ctrlKey || event.shiftKey) {
+            this.activePointerId = event.pointerId;
+            this.pointerMode = 'pan';
             this.panPreviousCanvasUv = this.getCanvasUv(event);
             this.pointerCurrentUv = null;
             this.pointerPreviousUv = null;
-        } else {
+            this.wallDraftStartUv = null;
+            this.wallDraftCurrentUv = null;
+            this.gpu.canvas.setPointerCapture(event.pointerId);
+            this.updateCanvasCursor();
+            event.preventDefault();
+            return;
+        }
+
+        if (this.domainEditMode === 'hotCircle') {
             const uv = this.getPointerUv(event);
             if (!uv) {
-                this.activePointerId = null;
-                this.pointerMode = null;
                 return;
             }
 
-            this.pointerCurrentUv = uv;
-            this.pointerPreviousUv = uv;
-            this.panPreviousCanvasUv = null;
+            this.flow.addHotCircleAtUv(uv);
+            this.invalidateHoverProbe(true);
+            event.preventDefault();
+            return;
         }
 
+        if (this.domainEditMode === 'ambientWall') {
+            this.activePointerId = event.pointerId;
+            this.pointerMode = 'ambientWall';
+            this.wallDraftStartUv = this.getClampedPointerUv(event);
+            this.wallDraftCurrentUv = this.wallDraftStartUv;
+            this.pointerCurrentUv = null;
+            this.pointerPreviousUv = null;
+            this.panPreviousCanvasUv = null;
+            this.gpu.canvas.setPointerCapture(event.pointerId);
+            this.updateCanvasCursor();
+            event.preventDefault();
+            return;
+        }
+
+        this.activePointerId = event.pointerId;
+        this.pointerMode = 'dye';
+        const uv = this.getPointerUv(event);
+        if (!uv) {
+            this.activePointerId = null;
+            this.pointerMode = null;
+            return;
+        }
+
+        this.pointerCurrentUv = uv;
+        this.pointerPreviousUv = uv;
+        this.panPreviousCanvasUv = null;
+        this.wallDraftStartUv = null;
+        this.wallDraftCurrentUv = null;
         this.gpu.canvas.setPointerCapture(event.pointerId);
         this.updateCanvasCursor();
         event.preventDefault();
@@ -178,6 +229,11 @@ export class App {
             return;
         }
 
+        if (this.pointerMode === 'ambientWall') {
+            this.wallDraftCurrentUv = this.getClampedPointerUv(event);
+            return;
+        }
+
         const uv = this.getPointerUv(event);
         if (!uv) {
             this.pointerCurrentUv = null;
@@ -194,6 +250,15 @@ export class App {
             return;
         }
 
+        if (
+            this.pointerMode === 'ambientWall' &&
+            this.wallDraftStartUv &&
+            this.wallDraftCurrentUv
+        ) {
+            this.flow.addAmbientWallAtUv(this.wallDraftStartUv, this.wallDraftCurrentUv);
+            this.invalidateHoverProbe(true);
+        }
+
         if (this.gpu.canvas.hasPointerCapture(event.pointerId)) {
             this.gpu.canvas.releasePointerCapture(event.pointerId);
         }
@@ -202,6 +267,8 @@ export class App {
         this.pointerMode = null;
         this.pointerCurrentUv = null;
         this.pointerPreviousUv = null;
+        this.wallDraftStartUv = null;
+        this.wallDraftCurrentUv = null;
         this.panPreviousCanvasUv = null;
         this.flow.clearDyeBrush();
         this.updateCanvasCursor();
@@ -290,10 +357,13 @@ export class App {
             this.flow.getDyeView(),
             this.flow.getTemperatureView(),
             this.flow.getVelocityView(),
+            this.flow.getDomainElementsBuffer(),
             this.renderMode,
             this.simulationParams.ambientTemperature,
             this.simulationParams.heaterTemperature,
             this.flow.getDomainAspectRatio(),
+            this.flow.getDomainWidthMeters(),
+            this.flow.getDomainHeightMeters(),
             this.camera.centerX,
             this.camera.centerY,
             this.camera.zoom
@@ -305,6 +375,15 @@ export class App {
 
     private getPointerUv(event: PointerEvent): Point | null {
         return this.canvasUvToDomainUv(this.getCanvasUv(event));
+    }
+
+    private getClampedPointerUv(event: MouseEvent): Point {
+        const uv = this.canvasUvToDomainUvUnclamped(this.getCanvasUv(event));
+
+        return {
+            x: clamp(uv.x, 0.0, 1.0),
+            y: clamp(uv.y, 0.0, 1.0)
+        };
     }
 
     private getCanvasUv(event: MouseEvent): Point {
@@ -369,6 +448,11 @@ export class App {
 
         if (this.activePointerId === null && (this.ctrlPressed || this.shiftPressed)) {
             this.gpu.canvas.style.cursor = 'grab';
+            return;
+        }
+
+        if (this.domainEditMode !== 'navigate') {
+            this.gpu.canvas.style.cursor = 'crosshair';
             return;
         }
 

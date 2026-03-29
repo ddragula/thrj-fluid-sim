@@ -14,10 +14,12 @@ const HEATER_DIAMETER_METERS = 0.015;
 const HEATER_RADIUS_METERS = HEATER_DIAMETER_METERS * 0.5;
 const HEATER_CENTER_X_METERS = DOMAIN_WIDTH_METERS * 0.5;
 const HEATER_CENTER_Y_METERS = DOMAIN_HEIGHT_METERS * 0.86;
-const MAX_SUBSTEPS_PER_FRAME = 12;
-const DIFFUSION_STABILITY_FACTOR = 0.24;
-const DYE_BRUSH_RADIUS_METERS = 0.005;
-const DYE_BRUSH_STRENGTH = 2.0;
+const MAX_SUBSTEPS_PER_FRAME = 24;
+const SUBSTEP_SAFETY_FACTOR = 0.05;
+const BUOYANCY_DISPLACEMENT_FRACTION = 0.35;
+const MIN_PRESSURE_ITERATIONS_PER_SUBSTEP = 6;
+const DYE_BRUSH_RADIUS_METERS = 0.006;
+const DYE_BRUSH_STRENGTH = 3.0;
 
 type Point = {
     x: number;
@@ -168,6 +170,10 @@ export class FlowEngine {
         const settings = this.simulationParams;
         const substepCount = this.getSubstepCount(dtSeconds, settings);
         const substepDt = dtSeconds / substepCount;
+        const pressureIterationsPerSubstep = this.getPressureIterationsPerSubstep(
+            settings,
+            substepCount
+        );
 
         for (let substepIndex = 0; substepIndex < substepCount; substepIndex += 1) {
             const substepTime =
@@ -218,7 +224,7 @@ export class FlowEngine {
                 workgroupsY
             );
 
-            for (let i = 0; i < settings.pressureIterations; i += 1) {
+            for (let i = 0; i < pressureIterationsPerSubstep; i += 1) {
                 this.encodeComputePass(
                     encoder,
                     this.pressurePipeline,
@@ -365,25 +371,58 @@ export class FlowEngine {
     ): number {
         const dx = DOMAIN_WIDTH_METERS / this.width;
         const dy = DOMAIN_HEIGHT_METERS / this.height;
+        const minCellSize = Math.min(dx, dy);
         const inverseGridScale =
             1.0 / (dx * dx) +
             1.0 / (dy * dy);
         const maxDiffusion =
             Math.max(settings.kinematicViscosity, settings.thermalDiffusivity);
+        const stableDtFromDiffusion =
+            maxDiffusion > 0.0
+                ? SUBSTEP_SAFETY_FACTOR /
+                    (maxDiffusion * inverseGridScale)
+                : Number.POSITIVE_INFINITY;
+        const buoyancyAcceleration =
+            settings.gravity *
+            settings.thermalExpansionCoefficient *
+            Math.max(settings.heaterTemperature - settings.ambientTemperature, 0.0);
+        const stableDtFromBuoyancy =
+            buoyancyAcceleration > 0.0
+                ? Math.sqrt(
+                    2.0 *
+                    BUOYANCY_DISPLACEMENT_FRACTION *
+                    minCellSize /
+                    buoyancyAcceleration
+                )
+                : Number.POSITIVE_INFINITY;
+        const stableDt = Math.min(stableDtFromDiffusion, stableDtFromBuoyancy);
 
-        if (maxDiffusion <= 0.0) {
+        if (!Number.isFinite(stableDt) || stableDt <= 0.0) {
             return 1;
         }
-
-        const stableDt =
-            DIFFUSION_STABILITY_FACTOR /
-            (maxDiffusion * inverseGridScale);
 
         return Math.max(
             1,
             Math.min(
                 MAX_SUBSTEPS_PER_FRAME,
                 Math.ceil(dtSeconds / stableDt)
+            )
+        );
+    }
+
+    private getPressureIterationsPerSubstep(
+        settings: FlowSimulationParams,
+        substepCount: number
+    ): number {
+        if (substepCount <= 1) {
+            return settings.pressureIterations;
+        }
+
+        return Math.min(
+            settings.pressureIterations,
+            Math.max(
+                MIN_PRESSURE_ITERATIONS_PER_SUBSTEP,
+                Math.ceil(settings.pressureIterations / substepCount)
             )
         );
     }

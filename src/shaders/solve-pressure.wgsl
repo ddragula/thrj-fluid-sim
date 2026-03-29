@@ -104,6 +104,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
             (top + bottom) * dx2 -
             divergence * dx2 * dy2
         ) / denominator;
+    let relaxedPressure = mix(center, pressure, 0.82);
 
-    textureStore(pressureOut, p, vec4f(pressure, 0.0, 0.0, 1.0));
+    textureStore(pressureOut, p, vec4f(relaxedPressure, 0.0, 0.0, 1.0));
 }

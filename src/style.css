@@ -11,26 +11,51 @@ body {
     font-family: "Segoe UI", sans-serif;
 }
 
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
 #app {
     display: block;
     width: 100vw;
     height: 100vh;
 }
 
-.simulation-panels {
+.simulation-panels-viewport {
     position: fixed;
     top: 16px;
     right: 16px;
     z-index: 10;
+    width: min(360px, calc(100vw - 24px));
+    height: calc(100vh - 32px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    pointer-events: none;
+}
+
+.simulation-panels-viewport::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+.simulation-panels {
     display: flex;
+    flex-direction: column;
     gap: 12px;
-    align-items: flex-start;
+    width: 100%;
+    min-height: max-content;
     pointer-events: none;
 }
 
 .simulation-panel {
     position: relative;
-    width: min(360px, calc(100vw - 24px));
+    width: 100%;
     border: 1px solid rgba(165, 195, 220, 0.24);
     border-radius: 16px;
     background: rgba(9, 14, 22, 0.86);
@@ -71,8 +96,8 @@ body {
 
 .simulation-view-reset {
     position: fixed;
-    right: 16px;
-    bottom: 16px;
+    top: 16px;
+    left: 16px;
     z-index: 8;
     border: 1px solid rgba(176, 205, 227, 0.16);
     border-radius: 999px;
@@ -150,10 +175,6 @@ body {
     font-weight: 600;
 }
 
-.simulation-panel:not([open]) {
-    width: auto;
-}
-
 .simulation-panel__summary {
     display: flex;
     align-items: center;
@@ -193,8 +214,6 @@ body {
     display: grid;
     gap: 12px;
     padding: 0 16px 16px;
-    max-height: min(78vh, 760px);
-    overflow: auto;
 }
 
 .simulation-panel__derived {
@@ -325,6 +344,10 @@ body {
     font: inherit;
 }
 
+.simulation-panel__number--wide {
+    width: 124px;
+}
+
 .simulation-panel__unit {
     font-size: 11px;
     color: #8ea6bf;
@@ -365,16 +388,13 @@ body {
 }
 
 @media (max-width: 720px) {
-    .simulation-panels {
+    .simulation-panels-viewport {
         top: 12px;
-        left: 12px;
-        right: 12px;
-        display: grid;
-        gap: 12px;
-    }
-
-    .simulation-panel {
-        width: auto;
+        left: 50%;
+        right: auto;
+        width: min(360px, calc(100vw - 24px));
+        height: calc(100vh - 24px);
+        transform: translateX(-50%);
     }
 
     .simulation-hint {
@@ -398,8 +418,8 @@ body {
     }
 
     .simulation-view-reset {
-        right: 12px;
-        bottom: 12px;
+        top: 12px;
+        left: 12px;
     }
 
     .simulation-readout {

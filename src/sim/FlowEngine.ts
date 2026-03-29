@@ -38,8 +38,6 @@ const MAX_SUBSTEPS_PER_FRAME = 24;
 const SUBSTEP_SAFETY_FACTOR = 0.05;
 const BUOYANCY_DISPLACEMENT_FRACTION = 0.35;
 const MIN_PRESSURE_ITERATIONS_PER_SUBSTEP = 6;
-const DYE_BRUSH_RADIUS_METERS = 0.006;
-const DYE_BRUSH_STRENGTH = 3.0;
 const DOMAIN_ELEMENT_STRIDE_BYTES = 48;
 const DOMAIN_ELEMENT_TYPE_NONE = 0;
 const DOMAIN_ELEMENT_TYPE_AMBIENT_WALL = 1;
@@ -500,8 +498,8 @@ export class FlowEngine {
                 brushFrom.y,
                 brushTo.x,
                 brushTo.y,
-                DYE_BRUSH_RADIUS_METERS,
-                DYE_BRUSH_STRENGTH,
+                settings.dyeBrushRadius,
+                settings.dyeBrushStrength,
                 this.dyeBrush.active ? 1.0 : 0.0,
                 0.0
             ])

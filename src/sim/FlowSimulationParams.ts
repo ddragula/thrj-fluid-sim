@@ -4,6 +4,8 @@ export const defaultFlowSimulationParams = {
     kinematicViscosity: 1.56e-5,
     thermalDiffusivity: 2.2e-5,
     dyeDecayRate: 0.24,
+    dyeBrushRadius: 0.006,
+    dyeBrushStrength: 3.0,
     heaterTemperature: 80.0,
     pressureIterations: 80
 };
@@ -85,6 +87,28 @@ export class FlowSimulationParams {
         );
     }
 
+    get dyeBrushRadius(): number {
+        return this.values.dyeBrushRadius;
+    }
+
+    set dyeBrushRadius(value: number) {
+        this.values.dyeBrushRadius = clampMin(
+            readNumber(value, defaultFlowSimulationParams.dyeBrushRadius),
+            0.0
+        );
+    }
+
+    get dyeBrushStrength(): number {
+        return this.values.dyeBrushStrength;
+    }
+
+    set dyeBrushStrength(value: number) {
+        this.values.dyeBrushStrength = clampMin(
+            readNumber(value, defaultFlowSimulationParams.dyeBrushStrength),
+            0.0
+        );
+    }
+
     get heaterTemperature(): number {
         return this.values.heaterTemperature;
     }
@@ -122,6 +146,12 @@ export class FlowSimulationParams {
         }
         if (patch.dyeDecayRate !== undefined) {
             this.dyeDecayRate = patch.dyeDecayRate;
+        }
+        if (patch.dyeBrushRadius !== undefined) {
+            this.dyeBrushRadius = patch.dyeBrushRadius;
+        }
+        if (patch.dyeBrushStrength !== undefined) {
+            this.dyeBrushStrength = patch.dyeBrushStrength;
         }
         if (patch.heaterTemperature !== undefined) {
             this.heaterTemperature = patch.heaterTemperature;

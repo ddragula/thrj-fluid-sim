@@ -18,6 +18,7 @@ type ParamControlDescriptor = {
     min: number;
     max: number;
     useRange: boolean;
+    wideNumber?: boolean;
 };
 
 type ParamControlElements = {
@@ -54,6 +55,29 @@ const PARAM_CONTROLS: ParamControlDescriptor[] = [
         useRange: true
     },
     {
+        key: 'kinematicViscosity',
+        label: 'Kinematic Viscosity',
+        unit: 'm^2/s',
+        step: 0.000001,
+        min: 0,
+        max: 0.001,
+        useRange: false,
+        wideNumber: true
+    },
+    {
+        key: 'thermalDiffusivity',
+        label: 'Thermal Diffusivity',
+        unit: 'm^2/s',
+        step: 0.000001,
+        min: 0,
+        max: 0.001,
+        useRange: false,
+        wideNumber: true
+    }
+];
+
+const DYE_PARAM_CONTROLS: ParamControlDescriptor[] = [
+    {
         key: 'dyeDecayRate',
         label: 'Dye Decay',
         unit: '1/s',
@@ -63,23 +87,28 @@ const PARAM_CONTROLS: ParamControlDescriptor[] = [
         useRange: true
     },
     {
-        key: 'kinematicViscosity',
-        label: 'Kinematic Viscosity',
-        unit: 'm^2/s',
-        step: 0.000001,
+        key: 'dyeBrushStrength',
+        label: 'Brush Strength',
+        unit: '1/s',
+        step: 0.1,
         min: 0,
-        max: 0.001,
-        useRange: false
+        max: 12,
+        useRange: true
     },
     {
-        key: 'thermalDiffusivity',
-        label: 'Thermal Diffusivity',
-        unit: 'm^2/s',
-        step: 0.000001,
-        min: 0,
-        max: 0.001,
-        useRange: false
+        key: 'dyeBrushRadius',
+        label: 'Brush Radius',
+        unit: 'm',
+        step: 0.001,
+        min: 0.001,
+        max: 0.05,
+        useRange: true
     }
+];
+
+const ALL_PARAM_CONTROLS: ParamControlDescriptor[] = [
+    ...PARAM_CONTROLS,
+    ...DYE_PARAM_CONTROLS
 ];
 
 const RENDER_MODE_OPTIONS = [
@@ -95,6 +124,7 @@ export class SimulationControlPanel {
     private readonly modeButtons = new Map<RenderMode, HTMLButtonElement>();
     private readonly betaValue: HTMLSpanElement;
     private readonly temperatureLegend: HTMLDivElement;
+    private readonly dyeControlsSection: HTMLDivElement;
     private temperatureLegendBar!: HTMLDivElement;
     private temperatureLegendMin!: HTMLSpanElement;
     private temperatureLegendMax!: HTMLSpanElement;
@@ -131,6 +161,8 @@ export class SimulationControlPanel {
         content.appendChild(this.createRenderModeSection());
         this.temperatureLegend = this.createTemperatureLegendSection();
         content.appendChild(this.temperatureLegend);
+        this.dyeControlsSection = this.createDyeControlsSection();
+        content.appendChild(this.dyeControlsSection);
 
         const derived = document.createElement('div');
         derived.className = 'simulation-panel__derived';
@@ -207,6 +239,22 @@ export class SimulationControlPanel {
         return section;
     }
 
+    private createDyeControlsSection(): HTMLDivElement {
+        const section = document.createElement('div');
+        section.className = 'simulation-panel__legend simulation-panel__legend--hidden';
+
+        const title = document.createElement('div');
+        title.className = 'simulation-panel__legend-title';
+        title.textContent = 'Dye Controls';
+        section.appendChild(title);
+
+        for (const descriptor of DYE_PARAM_CONTROLS) {
+            section.appendChild(this.createControl(descriptor));
+        }
+
+        return section;
+    }
+
     private createControl(descriptor: ParamControlDescriptor): HTMLElement {
         const row = document.createElement('div');
         row.className = 'simulation-panel__row';
@@ -238,6 +286,9 @@ export class SimulationControlPanel {
 
         const numberInput = document.createElement('input');
         numberInput.className = 'simulation-panel__number';
+        if (descriptor.wideNumber) {
+            numberInput.classList.add('simulation-panel__number--wide');
+        }
         numberInput.type = 'number';
         numberInput.min = String(descriptor.min);
         numberInput.max = String(descriptor.max);
@@ -307,7 +358,7 @@ export class SimulationControlPanel {
     private refresh(): void {
         const snapshot = this.params.toObject();
 
-        for (const descriptor of PARAM_CONTROLS) {
+        for (const descriptor of ALL_PARAM_CONTROLS) {
             const control = this.controls.get(descriptor.key);
             if (!control) {
                 continue;
@@ -337,6 +388,10 @@ export class SimulationControlPanel {
         this.temperatureLegend.classList.toggle(
             'simulation-panel__legend--hidden',
             this.renderMode !== RenderMode.Temperature
+        );
+        this.dyeControlsSection.classList.toggle(
+            'simulation-panel__legend--hidden',
+            this.renderMode !== RenderMode.Dye
         );
         this.dyeHint.classList.toggle(
             'simulation-hint--hidden',
